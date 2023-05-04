@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ja">
+    <head>
+        <meta charset="utf-8" />
+        <title>Todo App</title>
+        <link
+                href="https://jsprimer.net/use-case/todoapp/final/final/index.css"
+                rel="stylesheet"
+        />
+    </head>
+    <body>
+        <div class="todoapp">
+            <form id="js-form">
+                <input
+                    id="js-form-input"
+                    class="new-todo"
+                    type="text"
+                    placeholder="What need to be done?"
+                    autocomplete="off"
+                />
+            </form>
+            <div id="js-todo-list" class="toto-list"></div>
+            <footer class="footer">
+                <span id="js-todo-count">Todo items: 0</span>
+            </footer>
+        </div>
+        <script type="module" src="./index.js"></script>
+    </body>
+</html>
