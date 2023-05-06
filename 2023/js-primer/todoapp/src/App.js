@@ -45,7 +45,7 @@ export class App {
     #handleSubmit = (event) => {
         event.preventDefault();
         const inputElement = this.formInputElement;
-        this.#handleAdd(inputElement);
+        this.#handleAdd(inputElement.value);
         inputElement.value = "";
     };
 
