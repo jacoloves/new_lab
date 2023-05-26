@@ -1,0 +1,15 @@
+{
+    "name": "jest-tutorial",
+    "license": "UNLICENSED",
+    "devDependencies": {
+        "@types/jest": "^28.0.0",
+        "jest": "^28.0.0",
+        "ts-jest": "^28.0.0",
+        "typescript": "^5.0.4"
+    },
+    "dependencies": {
+        "@testing-library/jest-dom": "5",
+        "@testing-library/react": "14",
+        "@testing-library/user-event": "14"
+    }
+}
