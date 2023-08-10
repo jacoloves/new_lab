@@ -1,0 +1,113 @@
+/* calender */
+.cal {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 1em;
+    font-weight: normal;
+    line-height: 1.8;
+    box-shadow: 1px 2px 6px 0px rgb(0, 0, 0 / 20%);
+    width: fit-content;
+    height: fit-content;
+    position: fixed;
+    inset: 0;
+    margin: auto;
+}
+
+/* header */
+.cal__header {
+    background-color: #14b0eb;
+    color: #fff;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5em;
+}
+
+/* arrow */
+.cal__arrow {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 2em;
+    height: 2em;
+    cursor: pointer;
+}
+
+.cal__arrow::before {
+    content: "";
+    border: solid #fff;
+    border-width: 2px 2px 0 0;
+    width: 0.5em;
+    height: 0.5em;
+    display: block;
+}
+
+/* prev */
+.cal__prev::before {
+    transform: rotate(-135deg);
+}
+
+/* next */
+.cal__next::before {
+    transform: rotate(45deg);
+}
+
+/* title */
+.cal__title {
+    color: #fff;
+    font-weight: bold;
+}
+
+/* body */
+.cal__body table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+/* cell */
+.cal__body th,
+.cal__body td {
+    padding: 0.5em, 1em;
+    text-align: center;
+    font-weight: normal;
+}
+
+/* week style */
+.cal__week {
+    color: #ccc;
+}
+
+/* saturday style */
+.cal__week--sat {
+    color: #006fd0;
+}
+
+/* sunday style */
+.cal__week--sun {
+    color: #cd0042;
+}
+
+/* day style */
+.cal__day {
+    color: #333;
+}
+
+/* day prev style */
+.cal__day--prev {
+    color: #eee;
+}
+
+/* day next style */
+.cal__day--next {
+    color: #eee;
+}
+
+/* satur day style */
+.cal__day--sat {
+    color: #006fd0;
+}
+
+/* sunday style */
+.cal__day--sun {
+    color: #cd0042;
+}
