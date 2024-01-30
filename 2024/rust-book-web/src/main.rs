@@ -102,7 +102,7 @@ mod test {
 
     #[tokio::test]
     async fn should_find_todo() {
-        let expected = Todo::new(1, "shoud_find_todo".to_string());
+        let expected = Todo::new(1, "should_find_todo".to_string());
 
         let repository = TodoRepositoryForMemory::new();
         repository.create(CreateTodo::new("should_find_todo".to_string()));
