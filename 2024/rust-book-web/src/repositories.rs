@@ -27,17 +27,6 @@ pub struct Todo {
     completed: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct CreateTodo {
-    text: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct UpdateTodo {
-    text: Option<String>,
-    completed: Option<bool>,
-}
-
 impl Todo {
     pub fn new(id: i32, text: String) -> Self {
         Self {
@@ -46,6 +35,23 @@ impl Todo {
             completed: false,
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct CreateTodo {
+    text: String,
+}
+
+impl CreateTodo {
+    pub fn new(text: String) -> Self {
+        Self { text }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct UpdateTodo {
+    text: Option<String>,
+    completed: Option<bool>,
 }
 
 type TodoDatas = HashMap<i32, Todo>;
