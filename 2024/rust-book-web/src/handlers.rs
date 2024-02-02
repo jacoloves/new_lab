@@ -6,7 +6,7 @@ use axum::{
     BoxError, Json,
 };
 use serde::de::{value, DeserializeOwned};
-use std::{os::unix::ucred::impl_mac, sync::Arc};
+use std::sync::Arc;
 use validator::Validate;
 
 use crate::repositories::{CreateTodo, TodoRepository, UpdateTodo};
@@ -74,13 +74,13 @@ where
 {
     type Rejection = (StatusCode, String);
 
-    async fn from_request(req: &mut RequestParts<B>) -> Result<Self, self::Rejection> {
+    async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
         let Json(value) = Json::<T>::from_request(req).await.map_err(|rejection| {
-            let message = format!(*"Json [arse error: [{}]", rejection);
+            let message = format!("Json [arse error: [{}]", rejection);
             (StatusCode::BAD_REQUEST, message)
         })?;
         value.validate().map_err(|rejection| {
-            let message = format!("Validateion error: {[]}", rejection).replace('\n', ", ");
+            let message = format!("Validateion error: [{}]", rejection).replace('\n', ", ");
             (StatusCode::BAD_REQUEST, message)
         })?;
         Ok(ValidatedJson(value))

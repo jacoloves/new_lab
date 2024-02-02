@@ -1,13 +1,13 @@
 use anyhow::Context;
+use axum::async_trait;
 use serde::{Deserialize, Serialize};
 use sqlx::any;
-use validator::Validate;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 use thiserror::Error;
-use axum::async_trait;
+use validator::Validate;
 
 #[derive(Debug, Error)]
 enum RepositoryError {
@@ -58,7 +58,7 @@ impl CreateTodo {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Validate)]
 pub struct UpdateTodo {
     #[validate(length(min = 1, message = "Can not be empty"))]
-    #[validate(length(max = 100, message = "Over text length")))]
+    #[validate(length(max = 100, message = "Over text length"))]
     text: Option<String>,
     completed: Option<bool>,
 }
