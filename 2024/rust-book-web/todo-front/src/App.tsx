@@ -1,34 +1,96 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useState, FC } from 'react'
+import 'modern-css-reset'
+import { ThemeProvider, createTheme } from '@mui/material/styles'
+import { Box, Typography, Stack } from '@mui/material'
+import { NewTodoPayload, Todo } from './types/todo'
+import TodoForm from './components/TodoForm'
+import TodoList from './components/TodoList'
 
-function App() {
-  const [count, setCount] = useState(0)
+const TodoApp: FC = () => {
+  const [todos, setTodos] = useState<Todo[]>([])
+  const createId = () => todos.length + 1
 
+  // point 1
+  const onSubmit = async (payload: NewTodoPayload) => {
+    if (!payload.text) return
+    setTodos((prev) => [
+      {
+        id: createId(),
+        text: payload.text,
+        completed: false,
+      },
+      ...prev,
+    ])
+  }
+
+  const onUpdate = (updateTodo: Todo) => {
+    setTodos(
+      todos.map((todo) => {
+        if (todo.id === updateTodo.id) {
+          return {
+            ...todo,
+            ...updateTodo,
+          }
+        }
+        return todo
+      })
+    )
+  }
+
+  // point 2
   return (
     <>
-      <div>
-        <a href="https://vitejs.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
+      <Box
+        sx={{
+          backgroundColor: 'white',
+          borderBottom: '1px solid gray',
+          display: 'flex',
+          alignItems: 'center',
+          position: 'fixed',
+          top: 0,
+          p: 2,
+          width: '100%',
+          height: 80,
+          zIndex: 3,
+        }}
+      >
+        <Typography variant='h1'>Todo App</Typography>
+      </Box>
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          p: 5,
+          mt: 10,
+        }}
+      >
+        <Box maxWidth={700} width="100%">
+          <Stack spacing={5}>
+            <TodoForm onSubmit={onSubmit} />
+            <TodoList todos={todos} onUpdate={onUpdate} />
+          </Stack>
+        </Box>
+      </Box>
     </>
+  )
+}
+
+const theme = createTheme({
+  typography: {
+    h1: {
+      fontSize: 30,
+    },
+    h2: {
+      fontSize: 20,
+    },
+  },
+})
+
+const App: FC = () => {
+  return (
+    <ThemeProvider theme={theme}>
+      <TodoApp />
+    </ThemeProvider>
   )
 }
 
