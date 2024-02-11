@@ -10,7 +10,7 @@ type Props = {
 
 const TodoList: FC<Props> = ({ todos, onUpdate }) => {
     // point 2
-    const handleCompletedCheckbox = (todo: Tdodo) => {
+    const handleCompletedCheckbox = (todo: Todo) => {
         onUpdate({
             ...todo,
             completed: !todo.completed,
