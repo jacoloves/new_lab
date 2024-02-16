@@ -31,16 +31,58 @@ impl LabelRepositoryForDb {
 impl LabelRepository for LabelRepositoryForDb {
     async fn create(&self, name: String) -> anyhow::Result<Label> {
         let optional_label = sqlx::query_as::<_, Label>(
-
+            r#"
+            SELECT * FROM labels WHERE name = $1
+           "#,
         )
+        .bind(name.clone())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        // point1
+        if let Some(label) = optional_label {
+            return Err(RepositoryError::Duplicate(label.id).into());
+        }
+
+        let label = sqlx::query_as::<_, Label>(
+            r#"
+            INSER INTO labels (name) VALUES ($1) RETURNING *
+            "#,
+        )
+        .bind(name.clone())
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(label)
     }
 
     async fn all(&self) -> anyhow::Result<Vec<Label>> {
-        todo!()
+        let labels = sqlx::query_as::<_, Label>(
+            r#"
+            SELECT * FROM labels ORDER BY labels.id ASC;
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(labels)
     }
 
     async fn delete(&self, id: i32) -> anyhow::Result<()> {
-        todo!()
+        sqlx::query(
+            r#"
+            DELETE FROM labels WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => RepositoryError::NotFound(id),
+            _ => RepositoryError::Unexpected(e.to_string()),
+        })?;
+
+        Ok(())
     }
 }
 
