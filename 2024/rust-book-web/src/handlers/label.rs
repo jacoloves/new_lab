@@ -32,7 +32,7 @@ pub async fn all_label<T: LabelRepository>(
     Ok((StatusCode::OK, Json(labels)))
 }
 
-pub async fn delete_labale<T: LabelRepository>(
+pub async fn delete_label<T: LabelRepository>(
     Path(id): Path<i32>,
     Extension(repository): Extension<Arc<T>>,
 ) -> StatusCode {

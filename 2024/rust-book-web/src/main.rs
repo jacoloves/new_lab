@@ -1,16 +1,23 @@
 mod handlers;
 mod repositories;
 
-use crate::repositories::todo::{TodoRepository, TodoRepositoryForDb};
+use crate::repositories::{
+    label::LabelRepositoryForDb,
+    todo::{TodoRepository, TodoRepositoryForDb},
+};
 
 use axum::{
     extract::Extension,
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use dotenv::dotenv;
-use handlers::todo::{all_todo, create_todo, delete_todo, find_todo, update_todo};
+use handlers::{
+    label::{all_label, create_label, delete_label},
+    todo::{all_todo, create_todo, delete_todo, find_todo, update_todo},
+};
 use hyper::header::CONTENT_TYPE;
+use repositories::label::LabelRepository;
 use sqlx::PgPool;
 use std::{env, net::SocketAddr, sync::Arc};
 use tower_http::cors::{Any, CorsLayer, Origin};
@@ -29,8 +36,10 @@ async fn main() {
         "faile connect database, url is [{}]",
         database_url
     ));
-    let repository = TodoRepositoryForDb::new(pool.clone());
-    let app = create_app(repository);
+    let app = create_app(
+        TodoRepositoryForDb::new(pool.clone()),
+        LabelRepositoryForDb::new(pool.clone()),
+    );
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     tracing::debug!("listening on {}", addr);
 
@@ -40,17 +49,26 @@ async fn main() {
         .unwrap();
 }
 
-fn create_app<T: TodoRepository>(repository: T) -> Router {
+fn create_app<Todo: TodoRepository, Label: LabelRepository>(
+    todo_repository: Todo,
+    label_repository: Label,
+) -> Router {
     Router::new()
         .route("/", get(root))
-        .route("/todos", post(create_todo::<T>).get(all_todo::<T>))
+        .route("/todos", post(create_todo::<Todo>).get(all_todo::<Todo>))
         .route(
             "/todos/:id",
-            get(find_todo::<T>)
-                .delete(delete_todo::<T>)
-                .patch(update_todo::<T>),
+            get(find_todo::<Todo>)
+                .delete(delete_todo::<Todo>)
+                .patch(update_todo::<Todo>),
         )
-        .layer(Extension(Arc::new(repository)))
+        .route(
+            "/labels",
+            post(create_label::<Label>).get(all_label::<Label>),
+        )
+        .route("/labels/:id", delete(delete_label::<Label>))
+        .layer(Extension(Arc::new(todo_repository)))
+        .layer(Extension(Arc::new(label_repository)))
         .layer(
             CorsLayer::new()
                 .allow_origin(Origin::exact("http://localhost:3001".parse().unwrap()))
@@ -67,7 +85,9 @@ async fn root() -> &'static str {
 mod test {
     // point1
     use super::*;
-    use crate::repositories::todo::{test_utils::TodoRepositoryForMemory, CreateTodo, Todo};
+    use crate::repositories::todo::{
+        test_utils::TodoRepositoryForMemory, CreateTodo, TodoWithLabelFromRow,
+    };
     use axum::response::Response;
     use axum::{
         body::Body,
@@ -94,17 +114,17 @@ mod test {
     }
 
     // point3
-    async fn res_to_todo(res: Response) -> Todo {
+    async fn res_to_todo(res: Response) -> TodoWithLabelFromRow {
         let bytes = hyper::body::to_bytes(res.into_body()).await.unwrap();
         let body: String = String::from_utf8(bytes.to_vec()).unwrap();
-        let todo: Todo = serde_json::from_str(&body)
+        let todo: TodoWithLabelFromRow = serde_json::from_str(&body)
             .expect(&format!("cannot convert Todo instance. body: {}", body));
         todo
     }
 
     #[tokio::test]
     async fn should_created_todo() {
-        let expected = Todo::new(1, "should_return_created_todo".to_string());
+        let expected = TodoWithLabelFromRow::new(1, "should_return_created_todo".to_string());
 
         let repository = TodoRepositoryForMemory::new();
         let req = build_todo_req_with_json(
@@ -119,7 +139,7 @@ mod test {
 
     #[tokio::test]
     async fn should_find_todo() {
-        let expected = Todo::new(1, "should_find_todo".to_string());
+        let expected = TodoWithLabelFromRow::new(1, "should_find_todo".to_string());
 
         let repository = TodoRepositoryForMemory::new();
         repository
@@ -134,7 +154,7 @@ mod test {
 
     #[tokio::test]
     async fn should_get_all_todos() {
-        let expected = Todo::new(1, "should_get_all_todos".to_string());
+        let expected = TodoWithLabelFromRow::new(1, "should_get_all_todos".to_string());
 
         let repository = TodoRepositoryForMemory::new();
         repository
@@ -145,14 +165,14 @@ mod test {
         let res = create_app(repository).oneshot(req).await.unwrap();
         let bytes = hyper::body::to_bytes(res.into_body()).await.unwrap();
         let body: String = String::from_utf8(bytes.to_vec()).unwrap();
-        let todo: Vec<Todo> = serde_json::from_str(&body)
+        let todo: Vec<TodoWithLabelFromRow> = serde_json::from_str(&body)
             .expect(&format!("cannot convert Todo instance. body: {}", body));
         assert_eq!(vec![expected], todo);
     }
 
     #[tokio::test]
     async fn should_update_todo() {
-        let expected = Todo::new(1, "should_update_todo".to_string());
+        let expected = TodoWithLabelFromRow::new(1, "should_update_todo".to_string());
 
         let repository = TodoRepositoryForMemory::new();
         repository
