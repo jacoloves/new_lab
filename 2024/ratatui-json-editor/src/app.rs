@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+
+use serde_json::Result;
+
 pub enum CurrentScreen {
     Main,
     Editing,

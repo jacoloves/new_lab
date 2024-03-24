@@ -10,7 +10,15 @@ use crossterm::terminal::{enable_raw_mode, EnterAlternateScreen};
 use ratatui::backend::Backend;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use std::error::Error;
 use std::io;
+
+mod app;
+mod ui;
+use crate::{
+    app::{App, CurrentScreen, CurrentlyEditing},
+    ui::ui,
+};
 
 fn main() -> Result<(), Box<dyn Error>> {
     enable_raw_mode()?;
@@ -70,14 +78,14 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                     }
                     _ => {}
                 },
-                CurrentScreen::Editing if key.bind == KeyEventKind::Press => match key.code {
+                CurrentScreen::Editing if key.kind == KeyEventKind::Press => match key.code {
                     KeyCode::Enter => {
-                        if let Some(editing) = &app.currenty_editing {
+                        if let Some(editing) = &app.currently_editing {
                             match editing {
                                 CurrentlyEditing::Key => {
                                     app.currently_editing = Some(CurrentlyEditing::Value);
                                 }
-                                CurrentlyEditting::Value => {
+                                CurrentlyEditing::Value => {
                                     app.save_key_value();
                                     app.current_screen = CurrentScreen::Main;
                                 }
@@ -87,7 +95,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                     KeyCode::Backspace => {
                         if let Some(editing) = &app.currently_editing {
                             match editing {
-                                CurrentlyEditin::Key => {
+                                CurrentlyEditing::Key => {
                                     app.key_input.pop();
                                 }
                                 CurrentlyEditing::Value => {
@@ -117,6 +125,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                     }
                     _ => {}
                 },
+                _ => {}
             }
         }
     }
