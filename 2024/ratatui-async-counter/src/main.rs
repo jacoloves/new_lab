@@ -1,5 +1,6 @@
-use color_eyre::eyre::Ok;
+use color_eyre::eyre::{Ok, Result};
 use crossterm::event::Event;
+use ratatui::{backend::CrosstermBackend, Terminal};
 
 mod tui;
 
@@ -12,6 +13,33 @@ fn update(app: &mut App, event: Event) -> Result<()> {
             _ => {}
         }
     }
+    Ok(())
+}
+
+async fn run() -> Result<()> {
+    let mut events = tui::EventHandler::new();
+
+    let mut t = Terminal::new(CrosstermBackend::new(std::io::stderr()))?;
+
+    let mut app = App {
+        counter: 0,
+        should_quit: false,
+    };
+
+    loop {
+        let event = events.next().await?;
+
+        update(&mut app, event)?;
+
+        t.draw(|f| {
+            ui(f, &app);
+        })?;
+
+        if app.should_quit {
+            break;
+        }
+    }
+
     Ok(())
 }
 

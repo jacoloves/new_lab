@@ -1,13 +1,35 @@
 use color_eyre::eyre::Result;
-use crossterm::event::KeyEvent;
-use futures::{FutureExt, StreamExt};
-use tokio::{sync::mpsc, task::JoinHandle};
+use crossterm::event::{KeyEvent, MouseEvent};
+use futures::{channel::mpsc::UnboundedReceiver, FutureExt, StreamExt};
+use ratatui::backend::Backend;
+use tokio::{
+    sync::mpsc::{self, UnboundedSender},
+    task::JoinHandle,
+};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum Event {
     Error,
     Tick,
     Key(KeyEvent),
+    Init,
+    Quit,
+    Closed,
+    Render,
+    FocusGained,
+    FocusLost,
+    Paste(String),
+    Mouse(MouseEvent),
+    Resize(u16, u16),
+}
+
+pub struct Tui {
+    pub terminal: ratatui::Terminal<Backend<std::io::Stderr>>,
+    pub task: JoinHandle<()>,
+    pub event_rx: UnboundedReceiver<Event>,
+    pub event_tx: UnboundedSender<Event>,
+    pub frame_rate: f64,
+    pub tick_rate: f64,
 }
 
 #[derive(Debug)]
@@ -68,5 +90,19 @@ impl EventHandler {
             .recv()
             .await
             .ok_or(color_eyre::eyre::eyre!("Unable to get event"))
+    }
+}
+
+impl Tui {
+    pub fn start(&mut self) {
+        let tick_delay = std::time::Duration::from_secs_f64(1.0 / self.tick_rate);
+        let render_delay = std::time::Duration::from_secs_f64(1.0 / self.frame_rate);
+        let _event_tx = self.event_tx.clone();
+        self.task = tokio::spawn(async move {
+            let mut reader = crossterm::event::EventStream::new();
+            let mut tick_interval = tokio::time::interval(tick_delay);
+            let mut render_interval = tokio::time::interval(render_delay);
+            loop {}
+        })
     }
 }
