@@ -102,7 +102,36 @@ impl Tui {
             let mut reader = crossterm::event::EventStream::new();
             let mut tick_interval = tokio::time::interval(tick_delay);
             let mut render_interval = tokio::time::interval(render_delay);
-            loop {}
-        })
+            loop {
+                let tick_delay = tick_interval.tick();
+                let render_delay = render_interval.tick();
+                let crossterm_event = reader.netx().fuse();
+                tokio::select! {
+                    maybe_event = crossterm_event => {
+                        match maybe_event {
+                           Some(Ok(evt))  => {
+                                match evt {
+                                    CrosstermEvent::Key(key) => {
+                                        if key.king == KeyEventKind::Press {
+                                            _event_tx.send(Event::Key(key)).unwrap();
+                                        }
+                                    },
+                                }
+                           }
+                           Some(Err(_)) => {
+                            _event_tx.send(Event::Error).unwrap();
+                           }
+                           None => {},
+                        }
+                    },
+                    _ = tick_delay => {
+                        _event_tx.send(Event::Tick).unwrap();
+                    },
+                    _ = render_delay => {
+                        _event_tx.send(Event::Render).unwrap();
+                    },
+                }
+            }
+        });
     }
 }
