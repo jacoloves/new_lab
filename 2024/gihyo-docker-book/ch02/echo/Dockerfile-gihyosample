@@ -1,0 +1,4 @@
+FROM ghcr.io/gihyodocker/basetest:latest
+
+RUN cat /var/gihyodocker/version
+RUN cat /var/gihyodocker/version

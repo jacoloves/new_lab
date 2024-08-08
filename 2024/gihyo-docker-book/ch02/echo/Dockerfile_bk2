@@ -1,0 +1,9 @@
+FROM ubuntu:23.10
+LABEL maintainer="dockertato@example.com"
+
+ARG builddate
+ENV BUILDDATE=${builddate}
+ENV BUILDFROM="from Ubuntu"
+
+ENTRYPOINT ["/bin/bash", "-c"]
+CMD ["env"]
