@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  mysql:
+    container_name: mysql
+    image: mysql:8.0.33
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: yes
+      MYSQL_DATABASE: volume_test
+    volumes_from:
+      - mysql_data
+
+mysql_data:
+  container_name: mysql-data
+  build: .

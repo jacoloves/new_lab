@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  
+  mysql:
+    container_name: mysql
+    image: mysql:8.0.33
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+      MYSQL_DATABASE: test
+    secrets:
+      - mysql_root_password
+
+secrets:
+  mysql_root_password:
+    file: ./mysql_root_password
