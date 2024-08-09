@@ -1,0 +1,7 @@
+version: "3.9"
+
+services:
+  echo:
+    build: .
+    ports:
+      - 9000:8081

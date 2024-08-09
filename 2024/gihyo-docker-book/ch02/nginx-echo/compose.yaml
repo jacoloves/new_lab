@@ -1,0 +1,12 @@
+version: "3.9"
+
+services:
+  echo:
+    image: ghcr.io/gihyodocker/echo:v0.1.0
+
+  nginx:
+    build: ./nginx
+    depends_on:
+      - echo
+    ports:
+      - "9001:80"
