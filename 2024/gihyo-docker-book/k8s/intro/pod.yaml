@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: echo
+  labels:
+    app: echo
+spec:
+  containers:
+  - name: nginx
+    image: ghcr.io/gihyodocker/simple-nginx-proxy:v0.1.0
+    env:
+    - name: NGINX_PORT
+      value: "80"
+    - name: SERVER_NAME
+      value: "localhost"
+    - name: BACKEND_HOST
+      value: "localhost:8080"
+    - name: BACKEND_MAX_FAILS
+      value: "3"
+    - name: BACKEND_FAIL_TIMEOUT
+      value: "10s"
+    ports:
+    - containerPort: 80
+  - name: echo
+    image: ghcr.io/gihyodocker/echo:v0.1.0
+    ports:
+    - containerPort: 8080
+
