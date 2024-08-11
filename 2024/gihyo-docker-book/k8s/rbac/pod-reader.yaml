@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-reader
+  labels:
+    app: pod-reader
+spec:
+  serviceAccountName: pod-reader
+  containers:
+  - name: kebectl
+    image: bitnami/kubectl:1.27.4
+    command:
+    - sh
+    - -c
+    - |
+      while true
+      do
+        echo "Checking pod..."
+        kubectl get pod --all-namespaces
+        sleep 30
+      done

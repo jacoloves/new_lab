@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: print-version-strategy
+  labels:
+    app: print-version
+spec:
+  replicas: 4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 3
+      maxSurge: 4
+  selector:
+    matchLabels:
+      app: print-version
+  template:
+    metadata:
+      labels:
+        app: print-version
+    spec:
+      containers:
+      - name: print-version
+        image: ghcr.io/gihyodocker/print-version:v0.0.1
+        ports:
+        - containerPort: 8080

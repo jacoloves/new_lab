@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: print-version
+  labels:
+    app: print-version
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: print-version
+  template:
+    metadata:
+      labels:
+        app: print-version
+    spec:
+      containers:
+      - name: print-version
+        image: ghcr.io/gihyodocker/print-version:v0.0.2
+        livenessProbe:
+          exec:
+            command:
+            - cat
+            - /var/tmp/live.txt
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /hc
+            port: 8080
+          timeoutSeconds: 3
+          initialDelaySeconds: 15
+        ports:
+        - containerPort: 8080
