@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo
+  labels:
+    app.kubernetes.io/name: echo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: echo
+  template:
+    metadata:
+      matchLabels:  
+        app.kubernetes.io/name: echo
+    spec:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                 - echo
+            topologyKey: "kubernetes.io/hostname"
+      containers:
+      - name: nginx
+        image: ghcr.io/gihyodocker/simple-nginx-proxy:v0.1.0
+        env:
+        - name: NGINX_PORT
+          value: "80"
+        - name: SERVER_NAME
+          value: "localhost"
+        - name: BACKEND_HOST
+          value: "localhost:8080"
+        - name: BACKEND_MAX_FAILS
+          value: "3"
+        - name: BACKEND_FAIL_TIMEOUT
+          value: "10s"
+        ports:
+        - name: http 
+          containerPort: 80 
+      - name: echo
+        image: ghcr.io/gihyodocker/echo:v0.1.0
+      

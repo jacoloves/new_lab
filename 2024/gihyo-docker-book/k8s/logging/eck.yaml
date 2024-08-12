@@ -1,0 +1,115 @@
+eck-elasticsearch:
+  enabled: true
+  annotations:
+    eck.k8s.elastic.co/license: basic
+
+eck-kibana:
+  enabled: true
+  annotations:
+    eck.k8s.elastic.co/license: basic
+
+  spec:
+    http:
+      tls:
+        selfSignedCertificate:
+          disabled: true
+
+eck-beats:
+  enabled: true
+  annotations:
+    eck.k8s.elastic.co/license: basic
+
+  serviceAccount:
+    name: filebeat
+  
+  clusterRole:
+    name: filebeat
+    rules:
+    - apiGroups: [""]
+      resources:
+      - namespaces
+      - pods
+      - nodes
+      verbs:
+      - get
+      - watch
+      - list
+    - apiGroups: ["apps"]
+      resources:
+      - replicasets
+      verbs:
+      - get
+      - list
+      - watch
+    - apiGroups: ["batch"]
+      resources:
+      - jobs
+      verbs:
+      - get
+      - list
+      - watch
+
+  clusterRoleBinding:
+    name: filebeat
+    subjects:
+    - kind: ServiceAccount
+      name: filebeat
+    roleRef:
+      name: filebeat
+      kind: ClusterRole
+      apiGroup: rbac.authorization.k8s.io
+  
+  spec:
+    type: filebeat
+    elasticsearchRef:
+      name: elasticsearch
+    
+    daemonSet:
+      podTemplate:
+        spec:
+          serviceAccountName: filebeat
+          automountServiceAccountToken: true
+          terminationGracePeriodSeconds: 30
+          dnsPolicy: ClusterFirstWithHostNet
+          hostNetwork: true
+          containers:
+          - name: filebeat
+            securityContext:
+              runAsUser: 0
+            volumeMounts:
+            - name: varlogcontainers 
+              mountPath: /var/log/containers 
+            - name: varlogpods
+              mountPath: /var/log/pods
+            - name: varlibdockercontainers
+              mountPath: /var/lib/docker/containers
+            env:
+              - name: NODE_NAME
+                valueFrom:
+                  fieldRef:
+                    fieldPath: spec.nodeName
+            
+          volumes:
+          - name: varlogcontainers
+            hostPath:
+              path: /var/log/containers
+          - name: varlogpods
+            hostPath:
+              path: /var/log/pods
+          - name: varlibdockercontainers
+            hostPath:
+              path: /var/lib/docker/containers
+        
+    config:
+      filebeat:
+        autodiscover:
+          providers:
+          - type: kubernetes
+            node: ${NODE_NAME}
+            hints:
+              enabled: true
+              default_config:
+                type: container
+                paths:
+                - /var/log/containers/*${data.kubernetes.container.id}.log
+          
