@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: locust-master
+  namespace: load-test
+  labels:
+    app.kubernetes.io/name: locust-master
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: locust-master
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: locust-master
+    spec:
+      containers:
+        - name: locust
+          image: locustio/locust:2.16.1
+          args:
+            - "--master"
+            - "-H"
+            - "http://echo"
+            - "-f"
+            - "/usr/share/locust/locustfile.py"
+          ports:
+            - containerPort: 5557
+              name: conn
+              protocol: TCP
+            - containerPort: 8089
+              name: web
+              protocol: TCP
+          volumeMounts:
+            - name: locustfile
+              mountPath: "/usr/share/locust"
+              readOnly: true
+      volumes:
+        - name: locust
+          configMap:
+            name: locust
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: locust-master
+  namespace: load-test
+  labels:
+    app.kubernetes.io/name: locust-master
+spec:
+  ports:
+  - name: conn 
+    port: 5557 
+    targetPort: conn
+  - name: web
+    port: 8089
+    targetPort: web
+  selector:
+    app.kubernetes.io/name: locust-master

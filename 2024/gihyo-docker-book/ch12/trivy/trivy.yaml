@@ -1,0 +1,6 @@
+scan:
+  scanners:
+    - vuln
+
+severity:
+  - CRITICAL
