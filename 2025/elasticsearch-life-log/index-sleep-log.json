@@ -1,0 +1,22 @@
+PUT /sleep-log
+{
+  "mappings": {
+    "properties": {
+      "date": {
+        "type": "date"
+      },
+      "sleep_start": {
+        "type": "date"
+      },
+      "sleep_end": {
+        "type": "date"
+      },
+      "duration_hours": {
+        "type": "float"
+      },
+      "quality": {
+        "type": "keyword"
+      }
+    }
+  }
+}
