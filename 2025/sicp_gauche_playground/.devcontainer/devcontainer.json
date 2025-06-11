@@ -1,0 +1,6 @@
+{
+  "name": "Gauche Dev",
+  "dockerFile": "../Dockerfile",
+  "postCreateCommand": "gosh -c '(display \"Gauche Dev Container is ready\\n\")'",
+  "remoteUser": "root"
+}

@@ -1,0 +1,5 @@
+(define (sum-two-largest-squares x y z)
+  (define (square n) (* n n))
+  (let ((m (min x y z)))
+    (- (+ (square x) (square y) (square z))
+       (square m))))
