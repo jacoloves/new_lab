@@ -1,0 +1,22 @@
+(define (expmod base exp m)
+  (cond ((= exp 0) 1)
+        ((even? exp)
+          (let ((half (expmod base (/ exp 2) m)))
+            (remainder (* half half) m)))
+        (else
+          (remainder (* base (expmod base (- exp 1) m)) m))))
+
+(define (fermat-test n)
+  (let* ((a (+ 2 (random (- n 3))))
+         (r (expmod a (- n 1) n)))
+    (= r 1)))
+
+(define (fast-prime? n k)
+  (cond ((< n 2) #f)
+        ((= n 2) #t)
+        ((even? n) #f)
+        (else (define (iter i)
+                (cond ((= i 0) #t)
+                      ((fermat-test n) (iter (- i 1)))
+                      (else #f)))
+                (iter k))))
