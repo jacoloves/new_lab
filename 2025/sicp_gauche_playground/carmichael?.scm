@@ -11,3 +11,10 @@
           ((= (expmod a n n) a) (iter (+ a 1)))
           (else #f)))
   (iter 1))
+
+(define carmichael-list '(561 1105 1729 2465 2821 6601))
+(define control-list '(15 21 25 33))
+
+(map (lambda (n) (list n (camichael? n))) carmichael-list)
+
+(map (lambda (n) (list n (camichael? n))) control-list)
