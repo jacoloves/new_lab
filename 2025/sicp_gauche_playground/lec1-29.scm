@@ -1,0 +1,27 @@
+(define (cube x) (* x x x))
+
+(define (simpson-integral f a b n)
+  (let* ((h (/ (- b a) n))
+         (y0 (f a))
+         (yn (f b)))
+    (define (term k)
+      (let ((y (f (+ a (* k h)))))
+        (cond ((even? k) (* 2 y))
+              (else      (* 4 y)))))
+    (define (sum-terms k acc)
+      (if (= k n)
+          acc
+          (sum-terms (+ k 1) (+ acc (term k)))))
+    (* (/ h 3)
+       (+ y0 (sum-terms 1 yn)))))
+
+(define (intergral f a b dx)
+  (define (sum term a next b)
+    (if (> a b)
+        0
+        (+ (term a)
+           (sum term (next a) next b))))
+  (* (+ (/ (f a) 2)
+        (sum f (+ a dx) (lambda (x) (+ x dx)) (- b dx))
+        (/ (f b) 2))
+  dx))
