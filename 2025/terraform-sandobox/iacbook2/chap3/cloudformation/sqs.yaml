@@ -1,0 +1,10 @@
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  MyQueue2:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: test-queue-cfn-2
+      MaximumMessageSize: 2048
+      Tags:
+        - Key: name
+          Value: test-queue-cfn-2
