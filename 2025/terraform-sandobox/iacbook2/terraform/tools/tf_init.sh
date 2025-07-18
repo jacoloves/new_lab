@@ -13,7 +13,7 @@ STAGE=$1
 MODULE_NAME=$2
 
 ROOTDIR=$(cd "$(dirname $0)"/.. && pwd)
-BACKEND_BUCKET_NAME="${STAGE}-tfstate-aws-${BUCKET_SUFFIX}"
+BACKEND_BUCKET_NAME="${STAGE}-tfstate-aws-${BUCKET_SUFFIX}-shooonng-20250302"
 
 if [ "${STAGE}" = "modules" ] || [ "${STAGE}" = "usecases" ]; then
 	MODULE_FLAG=1
@@ -69,7 +69,7 @@ provider "aws" {
 provider "aws" {
   alias  = "us_east_1"
   region = "us_east_1"
-  degault_tags {
+  default_tags {
     tags = {
       Terraform = "true"
       STAGE     = "${STAGE}"

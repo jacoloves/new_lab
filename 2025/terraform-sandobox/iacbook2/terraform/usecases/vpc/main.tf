@@ -35,4 +35,8 @@ module "vpc" {
     ? var.one_nat_gateway_per_az
     : false
   )
+
+  manage_default_security_group  = true
+  default_security_group_ingress = []
+  default_security_group_egress  = []
 }
