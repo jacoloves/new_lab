@@ -1,0 +1,10 @@
+FROM golang:1.22.3-bookworm as build
+ARG ARCH=arm64
+
+COPY src /go/src
+WORKDIR /go/src
+RUN go mod init print_event_go
+RUN go mod tidy
+RUN mkdir /asset && \
+    GOOS=linux GOARCH=${ARCH} go build -tags lambda.norpc -buildvcs=false \
+    -o /asset/bootstrap
