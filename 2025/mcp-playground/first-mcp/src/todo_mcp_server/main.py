@@ -1,10 +1,19 @@
 import asyncio
 import json
+import os
+import sys
 from typing import Optional
+
+# Add the parent directory to the Python path to enable imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp.server.fastmcp import FastMCP
 
-from .todo_manager import TodoManager
+# Import with absolute path
+try:
+    from todo_mcp_server.todo_manager import TodoManager
+except ImportError:
+    from src.todo_mcp_server.todo_manager import TodoManager
 
 mcp = FastMCP("todo-mcp-server")
 

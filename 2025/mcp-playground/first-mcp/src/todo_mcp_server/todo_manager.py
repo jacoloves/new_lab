@@ -10,13 +10,20 @@ from todo_mcp_server.models import TodoList, TodoItem
 class TodoManager:
     """Class responsible for managing the ToDo list and JSON persistence"""
 
-    def __init__(self, data_file: str = "data/todos.json"):
+    def __init__(self, data_file: str = None):
         """
         Init TodoManager
 
         Args:
             data_file: Path to the JSON file that stores the ToDo data
         """
+        if data_file is None:
+            import os
+
+            home_dir = os.path.expanduser("~")
+            data_dir = os.path.join(home_dir, ".todo_mcp")
+            data_file = os.path.join(data_dir, "todos.json")
+
         self.data_file = Path(data_file)
         self.todo_list = TodoList()
         self._ensure_date_directory()
