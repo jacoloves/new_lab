@@ -156,14 +156,14 @@ class TodoManager:
     def get_stats(self) -> dict:
         """Get stats"""
         all_tasks = self.todo_list.tasks
-        completed = len(self.get_completed_tasks())
-        pending = len(self.get_pending_tasks())
+        completed_tasks = self.get_completed_tasks()
+        pending_tasks = self.get_pending_tasks()
 
         return {
             "total_tasks": len(all_tasks),
-            "completed_task": completed,
-            "pending_tasks": pending,
-            "completion_rate": round(completed / len(all_tasks) * 100, 1)
+            "completed_tasks": len(completed_tasks),
+            "pending_tasks": len(pending_tasks),
+            "completion_rate": round(len(completed_tasks) / len(all_tasks) * 100, 1)
             if all_tasks
             else 0,
             "high_priority": len(self.get_tasks_by_priority("high")),
