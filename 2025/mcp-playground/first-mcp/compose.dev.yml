@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  todo-mcp-server-dev:
+    build: .
+    container_name: todo-mcp-server-devices:
+    volumes:
+      # Mount source code for development
+      - ./src:/app/src
+      - ./run_server.py:/app/run_server.py
+      - ./pyproject.toml:/app/pyproject.toml
+      # Mount data directory
+      - ./data:/home/mcpuser/.todo_mcp
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DEVELOPMENT=1
+    command: uv run python run_server.py
+    restart: unless-stopped

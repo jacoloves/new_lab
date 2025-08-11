@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  todo-mcp-server:
+    build: .
+    container_name: todo-mcp-server
+    volumes:
+      # Mount host direcotory for persistent data
+      - ./data:/home/mcpuser/.todo_mcp
+    environment:
+      - PYTHONUNBUFFERED=1
+    # For stdio-based MCP, we typically don't expose ports
+    # but this can be useful for debugging
+    # ports:
+    #   - "8000:8000"
+    restart: unless-stopped
+
+    # Health check (optional)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

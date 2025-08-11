@@ -1,0 +1,36 @@
+# Python
+__pychache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.env
+
+# Testing
+test_data/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DO_Store
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+docs/
+
+# Temporary files
+*.tmp
+*.temp
+
