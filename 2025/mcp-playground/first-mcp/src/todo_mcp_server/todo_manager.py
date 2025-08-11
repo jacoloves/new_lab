@@ -93,7 +93,7 @@ class TodoManager:
         """Get tasks with the specified ID"""
         return self.todo_list.get_task(task_id)
 
-    def update__task(
+    def update_task(
         self,
         task_id: int,
         title: Optional[str] = None,
@@ -134,14 +134,14 @@ class TodoManager:
             return task
         return None
 
-    def delete_tasks(self, task_id: int) -> bool:
+    def delete_task(self, task_id: int) -> bool:
         """Delete tasks"""
         if self.todo_list.remove_task(task_id):
             self._save_data()
             return True
         return False
 
-    def get_completed_task(self) -> List[TodoItem]:
+    def get_completed_tasks(self) -> List[TodoItem]:
         """Get completed task"""
         return self.todo_list.get_completed_tasks()
 
@@ -156,12 +156,12 @@ class TodoManager:
     def get_stats(self) -> dict:
         """Get stats"""
         all_tasks = self.todo_list.tasks
-        completed = len(self.get_completed_task())
+        completed = len(self.get_completed_tasks())
         pending = len(self.get_pending_tasks())
 
         return {
             "total_tasks": len(all_tasks),
-            "complete_task": completed,
+            "completed_task": completed,
             "pending_tasks": pending,
             "completion_rate": round(completed / len(all_tasks) * 100, 1)
             if all_tasks

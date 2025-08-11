@@ -57,7 +57,7 @@ class TodoList(BaseModel):
         self,
         title: str,
         description: Optional[str] = None,
-        prority: str = "medium",
+        priority: str = "medium",
         due_date: Optional[datetime] = None,
     ) -> TodoItem:
         """add new Tasks"""
@@ -67,7 +67,7 @@ class TodoList(BaseModel):
             id=new_id,
             title=title,
             description=description,
-            prority=prority,
+            priority=priority,
             due_date=due_date,
         )
         self.tasks.append(task)
