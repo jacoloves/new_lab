@@ -135,7 +135,7 @@ For development with live code changes:
 
 ```bash
 # Development mode with volume mounting
-docker compose -f docker-compose.dev.yml up -d
+docker compose -f compose.dev.yml up -d
 ```
 
 ## 🤝 Support
