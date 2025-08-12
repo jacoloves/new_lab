@@ -1,9 +1,7 @@
-version: '3.8'
-
 services:
   todo-mcp-server-dev:
     build: .
-    container_name: todo-mcp-server-devices:
+    container_name: todo-mcp-server-devices
     volumes:
       # Mount source code for development
       - ./src:/app/src

@@ -1,12 +1,10 @@
-version: '3.8'
-
 services:
   todo-mcp-server:
     build: .
     container_name: todo-mcp-server
     volumes:
       # Mount host direcotory for persistent data
-      - ./data:/home/mcpuser/.todo_mcp
+      - ./data:/root/.todo_mcp
     environment:
       - PYTHONUNBUFFERED=1
     # For stdio-based MCP, we typically don't expose ports
@@ -15,9 +13,16 @@ services:
     #   - "8000:8000"
     restart: unless-stopped
 
+    # Resource limits to prevent system overload
+    deploy:
+      resources:
+        limits:
+          memory: 256M 
+          cpus: '0.25'
+
     # Health check (optional)
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test: ["CMD", "echo", "healthy"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -2,7 +2,6 @@
 name = "first-mcp"
 version = "0.1.0"
 description = "Add your description here"
-readme = "README.md"
 authors = [
     { name = "shooonng", email = "5511068t@gmail.com" }
 ]
