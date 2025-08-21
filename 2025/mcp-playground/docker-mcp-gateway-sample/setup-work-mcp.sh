@@ -37,11 +37,19 @@ echo "Building work MCP containers..."
 
 # GiHub work container
 echo "Building GitHub work MCP server..."
-cd containers/github && docker build -t mcp/github-work-server:latest . && cd ../..
+if ! docker build -t mcp/github-work-server:latest ./containers/github; then
+  echo "GitHub container build failed"
+  exit 1
+fi
+echo "GitHub container built seccessfully"
 
 # Slack work container
 echo "Building Slack work MCP server..."
-cd containers/slack && docker build -t mcp/github-work-server:latest . && cd ../..
+if ! docker build -t mcp/slack-work-server:latest ./containers/slack; then
+  echo "Slack container build failed"
+  exit 1
+fi
+echo "Slack container built seccessfully"
 
 # Enable server
 echo "Enabling work MCP servers..."

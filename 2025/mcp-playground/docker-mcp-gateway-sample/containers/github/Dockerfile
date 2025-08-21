@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @modelcontextprotocol/server-gihub
+RUN npm install -g @modelcontextprotocol/server-github
 
 RUN groupadd -r mcpwork && useradd -r -g mcpwork -u 1001 mcpuser
 RUN chown -R mcpuser:mcpwork /app

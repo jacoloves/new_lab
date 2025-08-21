@@ -1,7 +1,7 @@
 FROM node:18-slim
 
 LABEL maintainer="work-mcp-team"
-LABEL descriptioin="Slack MCP Server for work team communication"
+LABEL description="Slack MCP Server for work team communication"
 
 WORKDIR /app
 
@@ -20,6 +20,6 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=10s \
   CMD echo "work-slack-mcp-healthy"
 
 ENV NODE_ENV=production
-ENV MCP_ENVIRONEMNT=work
+ENV MCP_ENVIRONMENT=work
 
 CMD ["npx", "@modelcontextprotocol/server-slack"]

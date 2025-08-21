@@ -2,7 +2,7 @@ apiVersion: v1
 kind: MCPGatewayConfig
 metadata:
   name: work-mcp-gateway
-  description: "Work-focused MCP gateway for GitHubm Slack and Atlassian intergration"
+  description: "Work-focused MCP gateway for GitHub Slack and Atlassian intergration"
 
 servers:
   # 1. GitHub MCP Server
