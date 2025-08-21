@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: MCPGatewayConfig
+metadata:
+  name: work-mcp-gateway
+  description: "Work-focused MCP gateway for GitHubm Slack and Atlassian intergration"
+
+servers:
+  # 1. GitHub MCP Server
+  github:
+    type: "container"
+    image: "mac/github-server:latest"
+    description: "GitHub repository and pull request management for development workflow"
+    transport: "stdio"
+    timeout: 60
+    enabled: true
+    environment:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "{{github.personal_access_token}}"
+    auto_approve:
+      - "get_pull_request_files"
+      - "get_repository_info"
+      - "list_repositories"
+      - "get_issues"
+    build:
+      context: "./containers/github"
+      dockerfile: "Dockerfile"
+
+  # 2. Slack MCP Server
+  slack:
+    type: "container"
+    image: "mcp/slack-server:latest"
+    description: "Slack messaging and team communication"
+    transport: "stdio"
+    enabled: true
+    environment:
+      SLACK_TEAM_ID: "{{slack.team_id}}"
+      SLACK_CHANNEL_IDS: "{{slack.channel_ids}}"
+    build:
+      context: "./containers/slack"
+      dockerfile: "Dockerfile"
+
+  #3. Atlassian MCP Server
+  atlassian:
+    type: "remote"
+    transport: "sse"
+    endpoint: "https://mcp.atlassian.com/v1/sse"
+    description: "Atlassian Jira and Counfluence for project management"
+    timeout: 60
+    enabled: true
+    health_check:
+      enabled: true
+      interval: "120s" 
+      timeout: "15s"
+      retries: 3
+
+# Gateway settings
+gateway:
+  transport: "stdio"
+  log_level: "info"
+  log_calls: true
+  log_format: "structured"
+
+  # security
+  security:
+    verify_signatures: true
+    block_secrets: true
+    isolocation: "container"
+    allowed_domains:
+      - "github.com"
+      - "api.github.com"
+      - "slack.com"
+      - "*.atlassian.com"
+      - "*.atlassian.net"
+
+  # performance
+  performance:
+    max_concurrent_requests: 25
+    request_timeout: "60s"
+    rate_limiting:
+      enabled: true
+      requests_per_minute: 100
+
+  # workflow
+  workflows:
+    github_pr_review:
+      enabled: true
+      auto_fetch_files: true
+    slack_notifications:
+      enabled: true
+      channels: ["{{slack.channel_ids}}"]
+    atlassian_sync:
+      enabled: true
+      auto_update_status: false
+
+# secret
+secrets:
+  github:
+    personal_access_token:
+      source: "docker_secrets"
+      key: "github_work_pat"
+      description: "GitHub Personal Access Token for work repositories"
+
+  slack:
+    team_id:
+      source: "docker_secrets"
+      key: "slack_work_team_id"
+      descriptioin: "Slack Team ID for work workspace"
+    channel_ids:
+      source: "docker_secrets"
+      key: "github_work_pat"
+      description: "GitHub Personal Access Token for work repositories"
+
+# Logging setting
+logging:
+  level: "info"
+  format: "json"
+  outputs:
+    - type: "file"
+      path: "/var/log//mcp/work-gateway.log"
+      rotation:
+        max_size: "100MB"
+        max_files: 7
+    - type: "stdout"
+      format: "structured"
+
