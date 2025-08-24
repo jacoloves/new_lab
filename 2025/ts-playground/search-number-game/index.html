@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>数当てゲーム</title>
+    <link href="css/style.css" rel="stylesheet">
+  </head>
+  <body>
+    <div class="game-container">
+      <h1>🎯 数当てゲーム</h1>
+      <div class="subtatile">
+        100日チャレンジ - Day 1
+      </div>
+
+      <div class="game-info">
+        <div class="range">1 〜 <span id="maxNumber">100</span></div>
+        <div class="attempts">試行回数: <span id="attemptCount">0</span></div>
+      </div>
+
+      <div class="input-section">
+        <input type="number" id="guessInput" min="1" max="100" placeholder="?" autocomplete="off">
+        <button id="guessButton">予想！</button>
+      </div>
+
+      <div class="message" id="message">
+        1から100までの数字を当ててください！
+      </div>
+
+      <button class="new-game-btn" id="newGameButton">新しいゲーム</button>
+
+      <div class="history" id="historyContainer" style="display: none;">
+        <h3>📊 予想履歴</h3>
+        <div class="hisotryList"></div>
+      </div>
+    </div> 
+
+  </body>
+</html>
