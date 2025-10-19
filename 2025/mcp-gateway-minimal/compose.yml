@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: mcp-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+      POSTGRES_DB: mcp_gateway
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Gateway UI (Next.js)
+  gateway:
+    build: ./gateway
+    container_name: mcp-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres123@db:5432/mcp_gateway
+      JWT_SECRET: your-secret-jwt-key-change-this-in-production
+      NEXT_PUBLIC_PROXY_URL: ws://localhost:8000
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./gateway:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - mcp-network
+    command: npm run dev
+
+  # MCP Proxy/Router
+  proxy:
+    build: ./proxy
+    container_name: mcp-proxy
+    ports:
+      - "8000:8000"
+    environment:
+      JWT_SECRET: your-secret-jwt-key-change-this-in-production
+      GATEWAY_API_URL: http://gateway:3000/api
+      MCP_FILESYSTEM_URL: ws://mcp-filesystem:8081
+      MCP_GITHUB_URL: ws://mcp-github:8082
+      MCP_POSTGRES_URL: ws://mcp-postgres:8083
+    depends_on:
+      - mcp-filesystem
+      - mcp-github
+      - mcp-postgres
+    networks:
+      - mcp-network
+    volumes:
+      - ./proxy:/app
+      - /app/node_modules
+
+  # MCP Server - Filesystem
+  mcp-filesystem:
+    build: ./filesystem
+    container_name: mcp-filesystem
+    environment:
+      PORT: 8081
+      SERVER_TYPE: filesystem
+      ALLOWED_DIRECTORIES: /workspace
+    volumes:
+      - workspace:/workspace
+      - ./servers/filesystem:/app
+      - /app/node_modules
+    networks:
+      - mcp-network
+
+  # MCP Server - GitHub
+  mcp-github:
+    build: ./servers/github
+    container_name: mcp-github
+    environment:
+      PORT: 8082
+      SERVER_TYPE: github
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-your-github-token}
+    volumes:
+      - ./servers/github:/app
+      - /app/node_modules
+    networks:
+      - mcp-network
+
+
+  # MCP Server - PostgreSQL
+  mcp-postgres:
+    build: ./servers/postgres
+    container_name: mcp-postgres
+    environment:
+      PORT: 8083
+      SERVER_TYPE: postgres
+      POSTGRES_CONNECTION_STRING: postgres://postgres:postgres123@db:5432/mcp_gateway
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./servers/postgres:/app
+      - /app/node_modules
+    networks:
+      - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge
+
+volumes:
+  pgdata:
+  workspace:
