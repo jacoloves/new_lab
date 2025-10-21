@@ -1,0 +1,20 @@
+{
+  "servers": [
+    {
+      "name": "test-server-a",
+      "transport": "stdio",
+      "command": "node",
+      "args": ["../test-servers/server-a/index.js"],
+      "env": {}
+    },
+    {
+      "name": "test-server-b",
+      "transport": "stdio",
+      "command": "node",
+      "args": ["../test-servers/server-b/index.js"],
+      "env": {}
+    }
+  ],
+  "port": 3000,
+  "logLevel": "info"
+}
