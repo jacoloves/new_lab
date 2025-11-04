@@ -17,7 +17,7 @@ rules:
     - endpoints
     - services
     - pods
-    - namespace
+    - namespaces
     verbs:
     - list
     - watch
@@ -135,7 +135,7 @@ spec:
             - NET_BIND_SERVICE
             drop:
             - all
-          readOnlyEootFilesystem: true
+          readOnlyRootFilesystem: true
         livenessProbe:
           httpGet:
             path: /health
