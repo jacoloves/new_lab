@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: MCP Proxy Gateway on AWS Lambda
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.11
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+        AWS_REGION: ap-northeast-1
+        DYNAMODB_TABLE_NAME: mcp-servers
+        LOCAL_MODE: "false"
+
+Resources:
+  # Lambda関数
+  MCPProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: mcp-proxy-gateway
+      CodeUri: .
+      Handler: lambda_handler.lambda_handler # ← 変更: src. を削除
+      Description: MCP Proxy Gateway for aggregating multiple MCP servers
+      Architectures:
+      - x86_64
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: !Ref MCPServersTable
+      - Statement:
+        - Effect: Allow
+          Action:
+          - secretsmanager:GetSecretValue
+          Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:mcp/tokens/*'
+      Events:
+        ApiRoot:
+          Type: Api
+          Properties:
+            Path: /
+            Method: ANY
+        ApiProxy:
+          Type: Api
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+    Metadata:
+      # ← 追加
+      BuildMethod: python3.11
+
+  # DynamoDBテーブル
+  MCPServersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: mcp-servers
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: id
+        KeyType: HASH
+      Tags:
+      - Key: Project
+        Value: MCP-Proxy
+
+  # CloudWatch Logs
+  MCPProxyLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${MCPProxyFunction}'
+      RetentionInDays: 7
+
+Outputs:
+  MCPProxyApi:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+
+  MCPProxyFunction:
+    Description: "MCP Proxy Lambda Function ARN"
+    Value: !GetAtt MCPProxyFunction.Arn
+
+  MCPServersTable:
+    Description: "DynamoDB Table Name"
+    Value: !Ref MCPServersTable

@@ -14,6 +14,7 @@ build/
 # AWS
 .aws/
 *.pem
+.aws-sam/*
 
 # Environment
 .env
