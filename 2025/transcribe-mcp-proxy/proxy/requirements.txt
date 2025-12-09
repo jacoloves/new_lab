@@ -1,0 +1,16 @@
+# AWS SDK
+boto3>=1.34.0
+
+# FastMCP client
+fastmcp>=0.1.0
+
+# HTTP client
+httpx>=0.25.0
+httpx-sse>=0.4.0
+
+# JSON schema validation
+pydantic>=2.5.0
+
+# Local development server (optional, for SSE testing)
+flask>=3.0.0
+flask-cors>=4.0.0
