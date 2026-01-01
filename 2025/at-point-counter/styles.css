@@ -1,0 +1,128 @@
+:root {
+  color-scheme: light dark;
+  --bg: #0b1624;
+  --card-bg: #111d2f;
+  --accent: #7fc8ff;
+  --accent-strong: #4cb1ff;
+  --text: #f5f7fb;
+  --muted: #8da2c0;
+  --danger: #ff788a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  font-family: 'Segoe UI', 'Hiragino Sans', 'Yu Gothic', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  background: radial-gradient(circle at top, #1c2a44, #050810 60%);
+  color: var(--text);
+}
+
+#container {
+  width: min(420px, 100%);
+  background: var(--card-bg);
+  border-radius: 18px;
+  padding: 2rem;
+  box-shadow: 0 25px 45px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.total-label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+#sumNumber {
+  font-size: clamp(2.5rem, 7vw, 3.5rem);
+  font-weight: 700;
+  margin: 0;
+}
+
+.point-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.75rem;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.85rem 1rem;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.point-button {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.point-button:hover,
+.action-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.25);
+}
+
+.point-button:active,
+.action-button:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.action-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.action-button {
+  flex: 1 1 140px;
+  color: #0f172a;
+}
+
+.action-button--primary {
+  background: var(--accent);
+  color: #031225;
+}
+
+.action-button--ghost {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.action-button--danger {
+  background: rgba(255, 120, 138, 0.2);
+  color: var(--danger);
+}
+
+@media (max-width: 480px) {
+  body {
+    padding: 1.5rem;
+  }
+
+  #container {
+    padding: 1.5rem;
+  }
+}
