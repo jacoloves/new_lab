@@ -1,0 +1,157 @@
+# ========================================
+# macOS
+# ========================================
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ========================================
+# エディタ / IDE
+# ========================================
+# VSCode
+.vscode/
+*.code-workspace
+
+# JetBrains (IntelliJ, CLion, GoLand, etc.)
+.idea/
+*.iml
+
+# Vim / Neovim
+*.swp
+*.swo
+*~
+
+# ========================================
+# Rust
+# ========================================
+target/
+
+# ========================================
+# Go
+# ========================================
+# Goのバイナリ成果物
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# テストバイナリ
+*.test
+
+# Go カバレッジファイル
+*.out
+
+# ========================================
+# Python
+# ========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# 仮想環境
+.venv/
+venv/
+env/
+ENV/
+
+# パッケージビルド成果物
+*.egg-info/
+dist/
+build/
+*.egg
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ========================================
+# Node.js / TypeScript / JavaScript
+# ========================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ビルド成果物
+dist/
+build/
+.next/
+.nuxt/
+out/
+
+# ソースマップ (必要に応じて調整)
+*.js.map
+
+# ========================================
+# Terraform
+# ========================================
+# ローカルのTerraformディレクトリ
+.terraform/
+.terraform.lock.hcl
+
+# tfstateはバックエンドで管理するため除外
+*.tfstate
+*.tfstate.*
+
+# クラッシュログ
+crash.log
+crash.*.log
+
+# tfvarsには機密情報が含まれる可能性があるため除外
+# (必要なものは *.tfvars.example を作成して管理)
+*.tfvars
+*.tfvars.json
+
+# Terraformのオーバーライドファイル
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ========================================
+# Docker / Kubernetes
+# ========================================
+# Docker関連の機密ファイル
+docker-compose.override.yml
+
+# ========================================
+# 環境変数 / 機密情報
+# ========================================
+.env
+.env.local
+.env.*.local
+.env.production
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# ========================================
+# 一般的な一時ファイル
+# ========================================
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*.backup
+
+# ========================================
+# Haskell
+# ========================================
+dist-newstyle/
+.stack-work/
+*.hi
+*.o
+
+# ========================================
+# Claudeのワーキングファイル
+# ========================================
+.claude/worktrees/
