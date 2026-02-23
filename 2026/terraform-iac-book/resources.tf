@@ -7,3 +7,9 @@ module "vpc" {
     Usage = "sample vpc explanation"
   }
 }
+
+module "ecs_cluster" {
+  source  = "./modules/ecs/cluster"
+  service = "sample"
+  env     = terraform.workspace
+}
