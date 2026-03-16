@@ -37,6 +37,10 @@ class Link:
         node_x.add_link(self)
         node_y.add_link(self)
 
+    def transfer_packet(self, packet, from_node):
+        next_node = self.node_x if from_node != self.node_x else self.node_y
+        next_node.receive_packet(packet)
+
     def __str__(self):
         return f"リンク（{self.node_x.node_id} <-> {self.node_y.node_id}, 帯域幅:{self.bandwidth}, 遅延:{self.delay}, パケットロス率:{self.packet_loss}）"
 
