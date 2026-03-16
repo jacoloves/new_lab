@@ -55,8 +55,7 @@ class Packet:
 
 node1 = Node(node_id=1, address="00:01")
 node2 = Node(node_id=2, address="00:02")
-link = Link(node1, node2)
+link1 = Link(node1, node2)
 
-print(node1)
-print(node2)
-print(link)
+packet = Packet(source=node1.address, destination=node2.address, payload="Hello,Node 2!")
+node1.send_packet(packet)
