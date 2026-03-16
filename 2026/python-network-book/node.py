@@ -1,8 +1,48 @@
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
+
+class NetworkGraph:
+    def __init__(self):
+        self.graph = nx.Graph()
+
+    def add_node(self, node_id, label):
+        self.graph.add_node(node_id, label=label)
+
+    def add_link(self, node1_id, node2_id, label, bandwidth, delay):
+        self.graph.add_edge(node1_id, node2_id, label=label, bandwidth=bandwidth, delay=delay)
+
+    def draw(self):
+        def get_edge_width(bandwidth):
+            return np.log10(bandwidth) + 1
+
+        def get_edge_color(delay):
+            if delay <= 0.001:
+                return 'green'
+            elif delay <= 0.01:
+                return 'yellow'
+            else:
+                return 'red'
+
+        pos = nx.spring_layout(self.graph)
+        edge_widths = [get_edge_width(self.graph[u][v]['bandwidth']) for u, v in self.graph.edges()]
+        edge_colors = [get_edge_color(self.graph[u][v]['delay']) for u, v in self.graph.edges()]
+
+        nx.draw(self.graph, pos, with_labels=False, node_color='lightblue', node_size=2000, width=edge_widths, edge_color=edge_colors)
+        nx.draw_networkx_labels(self.graph, pos, labels=nx.get_node_attributes(self.graph, 'label'))
+        nx.draw_networkx_edge_labels(self.graph, pos, edge_labels=nx.get_edge_attributes(self.graph, 'label'))
+        plt.show()
+
 class Node:
-    def __init__(self, node_id, address=None):
+    def __init__(self, node_id, address=None, network_graph=None):
         self.node_id = node_id
         self.address = address
         self.links = []
+        self.network_graph = network_graph
+
+        if network_graph:
+            label = f'Node {node_id}\n{address}'
+            self.network_graph.add_node(node_id, label)
 
     def add_link(self, link):
         if link not in self.links:
@@ -14,7 +54,7 @@ class Node:
         else:
             for link in self.links:
                 next_node = link.node_x if self != link.node_x else link.node_y
-                print(f"ノード {self.node_id}からノード{next_node.node_id}へパケット転送")
+                print(f"ノード{self.node_id}からノード{next_node.node_id}へパケット転送")
                 link.transfer_packet(packet, self)
                 break
 
@@ -27,15 +67,20 @@ class Node:
         return f"ノード（ID:{self.node_id}, アドレス:{self.address}）, 接続:{connected_nodes_str}"
 
 class Link:
-    def __init__(self, node_x, node_y, bandwidth=10000, delay=0.001, packet_loss=0.0):
+    def __init__(self, node_x, node_y, bandwidth=10000, delay=0.001, packet_loss=0.0, network_graph=None):
         self.node_x = node_x
         self.node_y = node_y
         self.bandwidth = bandwidth
         self.delay = delay
         self.packet_loss = packet_loss
+        self.network_graph = network_graph
 
         node_x.add_link(self)
         node_y.add_link(self)
+
+        if network_graph:
+            label = f'{bandwidth/1000000} Mbps, {delay} s'
+            self.network_graph.add_link(node_x.node_id, node_y.node_id, label, self.bandwidth, self.delay)
 
     def transfer_packet(self, packet, from_node):
         next_node = self.node_x if from_node != self.node_x else self.node_y
@@ -53,9 +98,18 @@ class Packet:
     def __str__(self):
         return f"パケット（送信元:{self.source}, 宛先:{self.destination},ペイロード:{self.payload}）"
 
-node1 = Node(node_id=1, address="00:01")
-node2 = Node(node_id=2, address="00:02")
-link1 = Link(node1, node2)
+network_graph = NetworkGraph()
 
-packet = Packet(source=node1.address, destination=node2.address, payload="Hello,Node 2!")
-node1.send_packet(packet)
+node1 = Node(node_id=1, address="00:01", network_graph=network_graph)
+node2 = Node(node_id=2, address="00:02", network_graph=network_graph)
+link1 = Link(node1, node2, network_graph=network_graph)
+
+#network_graph.draw()
+
+# Question1
+packet1 = Packet(source=node2.address, destination=node1.address, payload="Hello,Node 1!")
+node2.send_packet(packet1)
+
+for i in range(10):
+    packet = Packet(source=node1.address, destination=node2.address, payload=f"node2 send coung: {i + 1}")
+    node1.send_packet(packet)
