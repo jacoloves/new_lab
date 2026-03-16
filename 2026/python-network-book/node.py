@@ -98,18 +98,46 @@ class Packet:
     def __str__(self):
         return f"パケット（送信元:{self.source}, 宛先:{self.destination},ペイロード:{self.payload}）"
 
+"""
 network_graph = NetworkGraph()
 
 node1 = Node(node_id=1, address="00:01", network_graph=network_graph)
 node2 = Node(node_id=2, address="00:02", network_graph=network_graph)
 link1 = Link(node1, node2, network_graph=network_graph)
+"""
 
-#network_graph.draw()
-
-# Question1
+# Question1,4
+"""
 packet1 = Packet(source=node2.address, destination=node1.address, payload="Hello,Node 1!")
 node2.send_packet(packet1)
 
 for i in range(10):
     packet = Packet(source=node1.address, destination=node2.address, payload=f"node2 send coung: {i + 1}")
     node1.send_packet(packet)
+"""
+
+# Question2,3
+"""
+node3 = Node(node_id=3, address="00:03", network_graph=network_graph)
+link2 = Link(node1, node3, network_graph=network_graph)
+node4 = Node(node_id=4, address="00:04", network_graph=network_graph)
+link3 = Link(node2, node4, network_graph=network_graph)
+network_graph.draw()
+"""
+
+# Question5
+network_graph = NetworkGraph()
+# 中央ハブ
+node1 = Node(node_id=1, address="00:01", network_graph=network_graph)
+# 末端ハブ
+node2 = Node(node_id=2, address="00:02", network_graph=network_graph)
+node3 = Node(node_id=3, address="00:03", network_graph=network_graph)
+node4 = Node(node_id=4, address="00:04", network_graph=network_graph)
+node5 = Node(node_id=5, address="00:05", network_graph=network_graph)
+# node1を中心に全ノードを接続する
+Link(node1, node2, bandwidth=1000000, delay=0.001, network_graph=network_graph)
+Link(node1, node3, bandwidth=1000000, delay=0.002, network_graph=network_graph)
+Link(node1, node4, bandwidth=500000, delay=0.005, network_graph=network_graph)
+Link(node1, node5, bandwidth=500000, delay=0.015, network_graph=network_graph)
+
+network_graph.draw()
