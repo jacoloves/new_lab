@@ -8,6 +8,18 @@ class Node:
         if link not in self.links:
             self.links.append(link)
 
+    def send_packet(self, packet):
+        if packet.destination == self.address:
+            self.receive_packet(packet)
+        else:
+            for link in self.links:
+                next_node = link.node_x if self != link.node_x else link.node_y
+                print(f"ノード {self.node_id}からノード{next_node.node_id}へパケット転送")
+                link.transfer_packet(packet, self)
+                break
+
+    def receive_packet(self, packet):
+        print(f"ノード{self.node_id}がパケットを受信:{packet.payload}")
 
     def __str__(self):
         connected_nodes = [link.node_x.node_id if self != link.node_x else link.node_y.node_id for link in self.links]
@@ -29,10 +41,10 @@ class Link:
         return f"リンク（{self.node_x.node_id} <-> {self.node_y.node_id}, 帯域幅:{self.bandwidth}, 遅延:{self.delay}, パケットロス率:{self.packet_loss}）"
 
 class Packet:
-    def __init__(self, source, destination, payload)
+    def __init__(self, source, destination, payload):
         self.source = source
         self.destination = destination
-        self.palyload = payload
+        self.payload = payload
 
     def __str__(self):
         return f"パケット（送信元:{self.source}, 宛先:{self.destination},ペイロード:{self.payload}）"
