@@ -6,6 +6,7 @@ import heapq
 import random
 from collections import defaultdict
 
+
 class NetworkEventScheduler:
     def __init__(self, log_enabled=False, verbose=False):
         self.current_time = 0
@@ -20,7 +21,9 @@ class NetworkEventScheduler:
         self.graph.add_node(node_id, label=label)
 
     def add_link(self, node1_id, node2_id, label, bandwidth, delay):
-        self.graph.add_edge(node1_id, node2_id, label=label, bandwidth=bandwidth, delay=delay)
+        self.graph.add_edge(
+            node1_id, node2_id, label=label, bandwidth=bandwidth, delay=delay
+        )
 
     def draw(self):
         def get_edge_width(bandwidth):
@@ -28,23 +31,39 @@ class NetworkEventScheduler:
 
         def get_edge_color(delay):
             if delay <= 0.001:
-                return 'green'
+                return "green"
             elif delay >= 0.01:
-                return 'yellow'
+                return "yellow"
             else:
-                return 'red'
+                return "red"
 
         pos = nx.spring_layout(self.graph)
-        edge_widths = [get_edge_width(self.graph[u][v]['bandwidth']) for u, v in self.graph.edges()]
-        edge_colors = [get_edge_color(self.graph[u][v]['delay']) for u, v in self.graph.edges()]
-        nx.draw(self.graph, pos, with_labels=False, node_color='lightblue', node_size=2000, width=edge_widths, edge_color=edge_colors)
-        nx.draw_networkx_labels(self.graph, pos, labels=nx.get_node_attributes(self.graph, 'label'))
-        nx.draw_networkx_edge_labels(self.graph, pos, edge_labels=nx.get_edge_attributes(self.graph, 'label'))
+        edge_widths = [
+            get_edge_width(self.graph[u][v]["bandwidth"]) for u, v in self.graph.edges()
+        ]
+        edge_colors = [
+            get_edge_color(self.graph[u][v]["delay"]) for u, v in self.graph.edges()
+        ]
+        nx.draw(
+            self.graph,
+            pos,
+            with_labels=False,
+            node_color="lightblue",
+            node_size=2000,
+            width=edge_widths,
+            edge_color=edge_colors,
+        )
+        nx.draw_networkx_labels(
+            self.graph, pos, labels=nx.get_node_attributes(self.graph, "label")
+        )
+        nx.draw_networkx_edge_labels(
+            self.graph, pos, edge_labels=nx.get_edge_attributes(self.graph, "label")
+        )
         plt.show()
 
     def schedule_event(self, event_time, callback, *args):
         event = (event_time, self.event_id, callback, args)
-        heapq.heappush(self.events,event)
+        heapq.heappush(self.events, event)
         self.event_id += 1
 
     def log_packet_info(self, packet, event_type, node_id=None):
@@ -53,10 +72,10 @@ class NetworkEventScheduler:
                 self.packet_logs[packet.id] = {
                     "source": packet.header["source"],
                     "destination": packet.header["destination"],
-                    "size":packet.size,
+                    "size": packet.size,
                     "creation_time": packet.creation_time,
                     "arrival_time": packet.arrival_time,
-                    "events": []
+                    "events": [],
                 }
 
             if event_type == "arrived":
@@ -68,34 +87,55 @@ class NetworkEventScheduler:
                 "node_id": node_id,
                 "packet_id": packet.id,
                 "src": packet.header["source"],
-                "dst": packet.header["destination"]
+                "dst": packet.header["destination"],
             }
             self.packet_logs[packet.id]["events"].append(event_info)
 
             if self.verbose:
-                print(f"Time: {self.current_time} Node: {node_id}, Event: {event_type}, Packet: {packet.id}, Src: {packet.header['source']}, Dst: {packet.header['destination']}")
+                print(
+                    f"Time: {self.current_time} Node: {node_id}, Event: {event_type}, Packet: {packet.id}, Src: {packet.header['source']}, Dst: {packet.header['destination']}"
+                )
 
     def print_packet_logs(self):
         for packet_id, log in self.packet_logs.items():
-            print(f"Packet ID: {packet_id} Src: {log['source']} {log['creation_time']} -> Dst: {log['destination']}{log['arrival_time']}")
+            print(
+                f"Packet ID: {packet_id} Src: {log['source']} {log['creation_time']} -> Dst: {log['destination']}{log['arrival_time']}"
+            )
 
-            for event in log['events']:
+            for event in log["events"]:
                 print(f"Time: {event['time']}, Event: {event['event']}")
 
     def generate_summary(self, packet_logs):
-        summary_data = defaultdict(lambda: {"sent_packets": 0, "sent_bytes": 0, "received_packets": 0, "received_bytes": 0, "total_delay": 0, "lost_packets": 0, "min_creation_time": float('inf'), "max_arrival_time": 0})
+        summary_data = defaultdict(
+            lambda: {
+                "sent_packets": 0,
+                "sent_bytes": 0,
+                "received_packets": 0,
+                "received_bytes": 0,
+                "total_delay": 0,
+                "lost_packets": 0,
+                "min_creation_time": float("inf"),
+                "max_arrival_time": 0,
+            }
+        )
 
         for packet_id, log in packet_logs.items():
             src_dst_pair = (log["source"], log["destination"])
             summary_data[src_dst_pair]["sent_packets"] += 1
             summary_data[src_dst_pair]["sent_bytes"] += log["size"]
-            summary_data[src_dst_pair]["min_creation_time"] = min(summary_data[src_dst_pair]["min_creation_time"], log["creation_time"])
+            summary_data[src_dst_pair]["min_creation_time"] = min(
+                summary_data[src_dst_pair]["min_creation_time"], log["creation_time"]
+            )
 
             if "arrival_time" in log and log["arrival_time"] is not None:
                 summary_data[src_dst_pair]["received_packets"] += 1
                 summary_data[src_dst_pair]["received_bytes"] += log["size"]
-                summary_data[src_dst_pair]["total_delay"] += log["arrival_time"] - log["creation_time"]
-                summary_data[src_dst_pair]["max_arrival_time"] = max(summary_data[src_dst_pair]["max_arrival_time"], log["arrival_time"])
+                summary_data[src_dst_pair]["total_delay"] += (
+                    log["arrival_time"] - log["creation_time"]
+                )
+                summary_data[src_dst_pair]["max_arrival_time"] = max(
+                    summary_data[src_dst_pair]["max_arrival_time"], log["arrival_time"]
+                )
             else:
                 summary_data[src_dst_pair]["lost_packets"] += 1
 
@@ -110,7 +150,9 @@ class NetworkEventScheduler:
             max_arrival_time = data["max_arrival_time"]
 
             traffic_duration = max_arrival_time - min_creation_time
-            avg_throughput = (received_bytes * 8 / traffic_duration) if traffic_duration > 0 else 0
+            avg_throughput = (
+                (received_bytes * 8 / traffic_duration) if traffic_duration > 0 else 0
+            )
             avg_delay = total_delay / received_packets if received_packets > 0 else 0
 
             print(f"Src-Dst Pair: {src_dst}")
@@ -125,32 +167,46 @@ class NetworkEventScheduler:
     def generate_throughput_graph(self, packet_logs):
         time_slot = 1.0
 
-        max_time = max(log['arrival_time'] for log in packet_logs.values() if log['arrival_time'] is not None)
-        min_time = min(log['creation_time'] for log in packet_logs.values())
+        max_time = max(
+            log["arrival_time"]
+            for log in packet_logs.values()
+            if log["arrival_time"] is not None
+        )
+        min_time = min(log["creation_time"] for log in packet_logs.values())
         num_slots = int((max_time - min_time) / time_slot) + 1
 
         throughput_data = defaultdict(list)
         for packet_id, log in packet_logs.items():
-            if log['arrival_time'] is not None:
-                src_dst_pair = (log['source'], log['destination'])
-                slot_index = int((log['arrival_time'] - min_time) / time_slot)
-                throughput_data[src_dst_pair].append((slot_index, log['size']))
+            if log["arrival_time"] is not None:
+                src_dst_pair = (log["source"], log["destination"])
+                slot_index = int((log["arrival_time"] - min_time) / time_slot)
+                throughput_data[src_dst_pair].append((slot_index, log["size"]))
 
         aggregated_throughput = defaultdict(lambda: defaultdict(int))
         for src_dst, packets in throughput_data.items():
             for slot_index in range(num_slots):
-                slot_throughput = sum(size * 8 for i, size in packets if i == slot_index)
+                slot_throughput = sum(
+                    size * 8 for i, size in packets if i == slot_index
+                )
                 aggregated_throughput[src_dst][slot_index] = slot_throughput / time_slot
 
         for src_dst, slot_data in aggregated_throughput.items():
             time_slots = list(range(num_slots))
             throughputs = [slot_data[slot] for slot in time_slots]
             times = [min_time + slot * time_slot for slot in time_slots]
-            plt.step(times, throughputs, label=f'{src_dst[0]} -> {src_dst[1]}', where='post', linestyle='-', alpha=0.5, marker='o')
+            plt.step(
+                times,
+                throughputs,
+                label=f"{src_dst[0]} -> {src_dst[1]}",
+                where="post",
+                linestyle="-",
+                alpha=0.5,
+                marker="o",
+            )
 
-        plt.xlabel('Time(s)')
-        plt.ylabel('Throughput(bps)')
-        plt.title('Throughput over time')
+        plt.xlabel("Time(s)")
+        plt.ylabel("Throughput(bps)")
+        plt.title("Throughput over time")
         plt.xlim(0, max_time)
         plt.legend()
         plt.show()
@@ -158,9 +214,9 @@ class NetworkEventScheduler:
     def generate_delay_histogram(self, packet_logs):
         delay_data = defaultdict(list)
         for packet_id, log in packet_logs.items():
-            if log['arrival_time'] is not None:
-                src_dst_pair = (log['source'], log['destination'])
-                delay = log['arrival_time'] - log ['creation_time']
+            if log["arrival_time"] is not None:
+                src_dst_pair = (log["source"], log["destination"])
+                delay = log["arrival_time"] - log["creation_time"]
                 delay_data[src_dst_pair].append(delay)
 
         num_plots = len(delay_data)
@@ -171,10 +227,16 @@ class NetworkEventScheduler:
 
         for i, (src_dst, delays) in enumerate(delay_data.items()):
             ax = axs[i] if num_plots > 1 else axs
-            ax.hist(delays, bins=np.arange(0, max_delay + bin_width, bin_width), alpha=0.5, color='royalblue', label=f'{src_dst[0]} -> {src_dst[1]}')
-            ax.set_xlabel('Delay(s)')
-            ax.set_ylabel('Frequency')
-            ax.set_title(f'Delay histogram for {src_dst[0]} -> {src_dst[1]}')
+            ax.hist(
+                delays,
+                bins=np.arange(0, max_delay + bin_width, bin_width),
+                alpha=0.5,
+                color="royalblue",
+                label=f"{src_dst[0]} -> {src_dst[1]}",
+            )
+            ax.set_xlabel("Delay(s)")
+            ax.set_ylabel("Frequency")
+            ax.set_title(f"Delay histogram for {src_dst[0]} -> {src_dst[1]}")
             ax.set_xlim(0, max_delay)
             ax.legend()
             plt.tight_layout()
@@ -249,7 +311,7 @@ class Node:
         self.node_id = node_id
         self.address = address
         self.links = []
-        label = f'Node {node_id}\n{address}'
+        label = f"Node {node_id}\n{address}"
         self.network_event_scheduler.add_node(node_id, label)
 
     def add_link(self, link):
@@ -261,10 +323,14 @@ class Node:
             self.network_event_scheduler.log_packet_info(packet, "lost", self.node_id)
             return
         if packet.header["destination"] == self.address:
-            self.network_event_scheduler.log_packet_info(packet, "arrived", self.node_id)
+            self.network_event_scheduler.log_packet_info(
+                packet, "arrived", self.node_id
+            )
             packet.set_arrived(self.network_event_scheduler.current_time)
         else:
-            self.network_event_scheduler.log_packet_info(packet, "received", self.node_id)
+            self.network_event_scheduler.log_packet_info(
+                packet, "received", self.node_id
+            )
             pass
 
     def send_packet(self, packet):
@@ -278,18 +344,37 @@ class Node:
                 break
 
     def create_packet(self, destination, header_size, payload_size):
-        packet = Packet(source=self.address, destination=destination, header_size=header_size, payload_size=payload_size, network_event_scheduler=self.network_event_scheduler)
+        packet = Packet(
+            source=self.address,
+            destination=destination,
+            header_size=header_size,
+            payload_size=payload_size,
+            network_event_scheduler=self.network_event_scheduler,
+        )
         self.network_event_scheduler.log_packet_info(packet, "created", self.node_id)
         self.send_packet(packet)
 
-    def set_traffic(self, destination, bitrate, start_time, duration, header_size, payload_size, burstiness=1.0):
+    def set_traffic(
+        self,
+        destination,
+        bitrate,
+        start_time,
+        duration,
+        header_size,
+        payload_size,
+        burstiness=1.0,
+    ):
         end_time = start_time + duration
+
         def generate_packet():
             if self.network_event_scheduler.current_time < end_time:
                 self.create_packet(destination, header_size, payload_size)
                 packet_size = header_size + payload_size
                 interval = (packet_size * 8) / bitrate * burstiness
-                self.network_event_scheduler.schedule_event(self.network_event_scheduler.current_time + interval, generate_packet)
+                self.network_event_scheduler.schedule_event(
+                    self.network_event_scheduler.current_time + interval,
+                    generate_packet,
+                )
 
         self.network_event_scheduler.schedule_event(start_time, generate_packet)
 
@@ -422,22 +507,3 @@ class Packet:
 
     def __str__(self):
         return f"パケット（送信元:{self.header['source']}, 宛先:{self.header['destination']},ペイロード:{self.payload}）"
-
-network_event_scheduler = NetworkEventScheduler(log_enabled=True, verbose=True)
-
-node1 = Node(node_id=1, address="00:01", network_event_scheduler=network_event_scheduler)
-node2 = Node(node_id=2, address="00:02", network_event_scheduler=network_event_scheduler)
-link1 = Link(node1, node2, bandwidth=10000, delay=0.001, loss_rate=0.0, network_event_scheduler=network_event_scheduler)
-
-network_event_scheduler.draw()
-
-header_size = 40
-payload_size = 85
-node1.set_traffic(destination="00:02", bitrate=1000, start_time=1.0, duration=10.0, burstiness=1.0, header_size=header_size, payload_size=payload_size)
-
-network_event_scheduler.run()
-
-network_event_scheduler.print_packet_logs()
-network_event_scheduler.generate_summary(network_event_scheduler.packet_logs)
-network_event_scheduler.generate_throughput_graph(network_event_scheduler.packet_logs)
-network_event_scheduler.generate_delay_histogram(network_event_scheduler.packet_logs)
