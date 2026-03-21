@@ -1,65 +1,64 @@
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
+import heapq
+import uuid
+import random
+from collections import defaultdict
 
-class NetworkGraph:
-    def __init__(self):
-        self.graph = nx.Graph()
-
-    def add_node(self, node_id, label):
-        self.graph.add_node(node_id, label=label)
-
-    def add_link(self, node1_id, node2_id, label, bandwidth, delay):
-        self.graph.add_edge(node1_id, node2_id, label=label, bandwidth=bandwidth, delay=delay)
-
-    def draw(self):
-        def get_edge_width(bandwidth):
-            return np.log10(bandwidth) + 1
-
-        def get_edge_color(delay):
-            if delay <= 0.001:
-                return 'green'
-            elif delay <= 0.01:
-                return 'yellow'
-            else:
-                return 'red'
-
-        pos = nx.spring_layout(self.graph)
-        edge_widths = [get_edge_width(self.graph[u][v]['bandwidth']) for u, v in self.graph.edges()]
-        edge_colors = [get_edge_color(self.graph[u][v]['delay']) for u, v in self.graph.edges()]
-
-        nx.draw(self.graph, pos, with_labels=False, node_color='lightblue', node_size=2000, width=edge_widths, edge_color=edge_colors)
-        nx.draw_networkx_labels(self.graph, pos, labels=nx.get_node_attributes(self.graph, 'label'))
-        nx.draw_networkx_edge_labels(self.graph, pos, edge_labels=nx.get_edge_attributes(self.graph, 'label'))
-        plt.show()
 
 class Node:
-    def __init__(self, node_id, address=None, network_graph=None):
+    def __init__(self, node_id, address, network_event_scheduler):
+        self.network_event_scheduler = network_event_scheduler
         self.node_id = node_id
         self.address = address
         self.links = []
-        self.network_graph = network_graph
 
-        if network_graph:
-            label = f'Node {node_id}\n{address}'
-            self.network_graph.add_node(node_id, label)
+        label = f'Node {node_id}\n{address}'
+        self.network_event_scheduler.add_node(node_id, label)
 
     def add_link(self, link):
         if link not in self.links:
             self.links.append(link)
 
+    def receive_packet(self, packet):
+        if packet.arrival_time == -1:
+            self.network_event_scheduler.log_packet_info(packet, "lost", self.node_id)
+            return
+
+        if packet.header["destination"] == self.address:
+            self.network_event_scheduler.log_packet_info(packet, "arrived", self.node_id)
+            packet.set_arrived(self.network_event_scheduler.current_time)
+        else:
+            self.network_event_scheduler.log_packet_info(packet, "received", self.node_id)
+
     def send_packet(self, packet):
-        if packet.destination == self.address:
+        self.network_event_scheduler.log_packet_info(packet, "sent", self.node_id)
+
+        if packet.header["destination"] == self.address:
             self.receive_packet(packet)
         else:
             for link in self.links:
                 next_node = link.node_x if self != link.node_x else link.node_y
-                print(f"ノード{self.node_id}からノード{next_node.node_id}へパケット転送")
-                link.transfer_packet(packet, self)
+                link.enqueue_packet(packet,self)
                 break
 
-    def receive_packet(self, packet):
-        print(f"ノード{self.node_id}がパケットを受信:{packet.payload}")
+    def create_packet(self. destination, header_size, payload_size):
+        packet = Packet(source=self.address, destination=destination, header_size=header_size, payload_size=payload_size, network_event_scheduler=self.network_event_scheduler)
+        self.network_event_scheduler.log_packet_info(packet, "created", self.node_id)
+        self.send_packet(packet)
+
+    def set_traffic(self, destination, bitrate, start_time, duration, header_size, payload_size, burstiness=1.0):
+        end_time = start_time + duration
+
+        def generate_packet():
+            if self.network_event_scheduler.current_time < end_time:
+                self.create_packet(destination, header_size, payload_size)
+                packet_size = header_size + payload_size
+                interval = (payload_size * 8) / bitrate * burstiness
+                self.network_event_scheduler.schedule_event(self.network_event_scheduler.current_time + interval, generate_packet)
+
+        self.network_event_scheduler.schedule_event(start_time, generate_packet)
 
     def __str__(self):
         connected_nodes = [link.node_x.node_id if self != link.node_x else link.node_y.node_id for link in self.links]
@@ -98,46 +97,3 @@ class Packet:
     def __str__(self):
         return f"パケット（送信元:{self.source}, 宛先:{self.destination},ペイロード:{self.payload}）"
 
-"""
-network_graph = NetworkGraph()
-
-node1 = Node(node_id=1, address="00:01", network_graph=network_graph)
-node2 = Node(node_id=2, address="00:02", network_graph=network_graph)
-link1 = Link(node1, node2, network_graph=network_graph)
-"""
-
-# Question1,4
-"""
-packet1 = Packet(source=node2.address, destination=node1.address, payload="Hello,Node 1!")
-node2.send_packet(packet1)
-
-for i in range(10):
-    packet = Packet(source=node1.address, destination=node2.address, payload=f"node2 send coung: {i + 1}")
-    node1.send_packet(packet)
-"""
-
-# Question2,3
-"""
-node3 = Node(node_id=3, address="00:03", network_graph=network_graph)
-link2 = Link(node1, node3, network_graph=network_graph)
-node4 = Node(node_id=4, address="00:04", network_graph=network_graph)
-link3 = Link(node2, node4, network_graph=network_graph)
-network_graph.draw()
-"""
-
-# Question5
-network_graph = NetworkGraph()
-# 中央ハブ
-node1 = Node(node_id=1, address="00:01", network_graph=network_graph)
-# 末端ハブ
-node2 = Node(node_id=2, address="00:02", network_graph=network_graph)
-node3 = Node(node_id=3, address="00:03", network_graph=network_graph)
-node4 = Node(node_id=4, address="00:04", network_graph=network_graph)
-node5 = Node(node_id=5, address="00:05", network_graph=network_graph)
-# node1を中心に全ノードを接続する
-Link(node1, node2, bandwidth=1000000, delay=0.001, network_graph=network_graph)
-Link(node1, node3, bandwidth=1000000, delay=0.002, network_graph=network_graph)
-Link(node1, node4, bandwidth=500000, delay=0.005, network_graph=network_graph)
-Link(node1, node5, bandwidth=500000, delay=0.015, network_graph=network_graph)
-
-network_graph.draw()
