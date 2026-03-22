@@ -1,14 +1,22 @@
+import re
 from .packet import Packet
 
 
 class Node:
-    def __init__(self, node_id, address, network_event_scheduler):
+    def __init__(self, node_id, mac_address, network_event_scheduler):
+        if not self.is_valid_mac_address(mac_address):
+            raise ValueError("無効なMACアドレス形式です。")
+
         self.network_event_scheduler = network_event_scheduler
         self.node_id = node_id
-        self.address = address
+        self.mac_address = mac_address
         self.links = []
-        label = f"Node {node_id}\n{address}"
+        label = f"Node {node_id}\n{mac_address}"
         self.network_event_scheduler.add_node(node_id, label)
+
+    def is_valid_mac_address(self, mac_address):
+        mac_format = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$")
+        return bool(mac_format.match(mac_address))
 
     def add_link(self, link):
         if link not in self.links:
@@ -18,7 +26,7 @@ class Node:
         if packet.arrival_time == -1:
             self.network_event_scheduler.log_packet_info(packet, "lost", self.node_id)
             return
-        if packet.header["destination"] == self.address:
+        if packet.header["destination_mac"] == self.mac_address:
             self.network_event_scheduler.log_packet_info(
                 packet, "arrived", self.node_id
             )
@@ -31,7 +39,7 @@ class Node:
 
     def send_packet(self, packet):
         self.network_event_scheduler.log_packet_info(packet, "sent", self.node_id)
-        if packet.header["destination"] == self.address:
+        if packet.header["destination_mac"] == self.mac_address:
             self.receive_packet(packet)
         else:
             for link in self.links:
@@ -39,10 +47,10 @@ class Node:
                 link.enqueue_packet(packet, self)
                 break
 
-    def create_packet(self, destination, header_size, payload_size):
+    def create_packet(self, destination_mac, header_size, payload_size):
         packet = Packet(
-            source=self.address,
-            destination=destination,
+            source_mac=self.mac_address,
+            destination_mac=destination_mac,
             header_size=header_size,
             payload_size=payload_size,
             network_event_scheduler=self.network_event_scheduler,
@@ -52,7 +60,7 @@ class Node:
 
     def set_traffic(
         self,
-        destination,
+        destination_mac,
         bitrate,
         start_time,
         duration,
@@ -64,7 +72,7 @@ class Node:
 
         def generate_packet():
             if self.network_event_scheduler.current_time < end_time:
-                self.create_packet(destination, header_size, payload_size)
+                self.create_packet(destination_mac, header_size, payload_size)
                 packet_size = header_size + payload_size
                 interval = (packet_size * 8) / bitrate * burstiness
                 self.network_event_scheduler.schedule_event(
@@ -80,4 +88,4 @@ class Node:
             for link in self.links
         ]
         connected_nodes_str = ",".join(map(str, connected_nodes))
-        return f"ノード（ID:{self.node_id}, アドレス:{self.address}）, 接続:{connected_nodes_str}"
+        return f"ノード（ID:{self.node_id}, アドレス:{self.mac_address}）, 接続:{connected_nodes_str}"

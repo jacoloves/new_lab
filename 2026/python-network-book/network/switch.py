@@ -22,7 +22,7 @@ class Switch:
         self.forward_packet(packet)
 
     def forward_packet(self, packet):
-        destination_address = packet.header["destination"]
+        destination_address = packet.header["destination_mac"]
         if destination_address in self.forwarding_table:
             link = self.forwarding_table[destination_address]
             self.network_event_scheduler.log_packet_info(packet, "forwarded", self.node_id)

@@ -83,8 +83,8 @@ class NetworkEventScheduler:
         if self.log_enabled:
             if packet.id not in self.packet_logs:
                 self.packet_logs[packet.id] = {
-                    "source": packet.header["source"],
-                    "destination": packet.header["destination"],
+                    "source_mac": packet.header["source_mac"],
+                    "destination_mac": packet.header["destination_mac"],
                     "size": packet.size,
                     "creation_time": packet.creation_time,
                     "arrival_time": packet.arrival_time,
@@ -99,20 +99,20 @@ class NetworkEventScheduler:
                 "event": event_type,
                 "node_id": node_id,
                 "packet_id": packet.id,
-                "src": packet.header["source"],
-                "dst": packet.header["destination"],
+                "src": packet.header["source_mac"],
+                "dst": packet.header["destination_mac"],
             }
             self.packet_logs[packet.id]["events"].append(event_info)
 
             if self.verbose:
                 print(
-                    f"Time: {self.current_time} Node: {node_id}, Event: {event_type}, Packet: {packet.id}, Src: {packet.header['source']}, Dst: {packet.header['destination']}"
+                    f"Time: {self.current_time} Node: {node_id}, Event: {event_type}, Packet: {packet.id}, Src: {packet.header['source_mac']}, Dst: {packet.header['destination_mac']}"
                 )
 
     def print_packet_logs(self):
         for packet_id, log in self.packet_logs.items():
             print(
-                f"Packet ID: {packet_id} Src: {log['source']} {log['creation_time']} -> Dst: {log['destination']}{log['arrival_time']}"
+                f"Packet ID: {packet_id} Src: {log['source_mac']} {log['creation_time']} -> Dst: {log['destination_mac']}{log['arrival_time']}"
             )
 
             for event in log["events"]:
@@ -133,7 +133,7 @@ class NetworkEventScheduler:
         )
 
         for packet_id, log in packet_logs.items():
-            src_dst_pair = (log["source"], log["destination"])
+            src_dst_pair = (log["source_mac"], log["destination_mac"])
             summary_data[src_dst_pair]["sent_packets"] += 1
             summary_data[src_dst_pair]["sent_bytes"] += log["size"]
             summary_data[src_dst_pair]["min_creation_time"] = min(
@@ -191,7 +191,7 @@ class NetworkEventScheduler:
         throughput_data = defaultdict(list)
         for packet_id, log in packet_logs.items():
             if log["arrival_time"] is not None:
-                src_dst_pair = (log["source"], log["destination"])
+                src_dst_pair = (log["source_mac"], log["destination_mac"])
                 slot_index = int((log["arrival_time"] - min_time) / time_slot)
                 throughput_data[src_dst_pair].append((slot_index, log["size"]))
 
@@ -228,7 +228,7 @@ class NetworkEventScheduler:
         delay_data = defaultdict(list)
         for packet_id, log in packet_logs.items():
             if log["arrival_time"] is not None:
-                src_dst_pair = (log["source"], log["destination"])
+                src_dst_pair = (log["source_mac"], log["destination_mac"])
                 delay = log["arrival_time"] - log["creation_time"]
                 delay_data[src_dst_pair].append(delay)
 
