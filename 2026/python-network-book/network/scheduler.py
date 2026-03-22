@@ -42,15 +42,30 @@ class NetworkEventScheduler:
         edge_colors = [
             get_edge_color(self.graph[u][v]["delay"]) for u, v in self.graph.edges()
         ]
-        nx.draw(
-            self.graph,
-            pos,
-            with_labels=False,
-            node_color="lightblue",
-            node_size=2000,
-            width=edge_widths,
-            edge_color=edge_colors,
+        nx.draw_networkx_edges(
+            self.graph, pos, width=edge_widths, edge_color=edge_colors
         )
+
+        for node, data in self.graph.nodes(data=True):
+            if "Switch" in data["label"]:
+                nx.draw_networkx_nodes(
+                    self.graph,
+                    pos,
+                    nodelist=[node],
+                    node_color="red",
+                    node_shape="s",
+                    node_size=2000,
+                )
+            else:
+                nx.draw_networkx_nodes(
+                    self.graph,
+                    pos,
+                    nodelist=[node],
+                    node_color="lightblue",
+                    node_shape="o",
+                    node_size=2000,
+                )
+
         nx.draw_networkx_labels(
             self.graph, pos, labels=nx.get_node_attributes(self.graph, "label")
         )
@@ -237,8 +252,9 @@ class NetworkEventScheduler:
             ax.set_title(f"Delay histogram for {src_dst[0]} -> {src_dst[1]}")
             ax.set_xlim(0, max_delay)
             ax.legend()
-            plt.tight_layout()
-            plt.show()
+
+        plt.tight_layout()
+        plt.show()
 
     def run(self):
         while self.events:
