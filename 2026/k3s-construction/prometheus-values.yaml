@@ -1,0 +1,30 @@
+grafana:
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - grafana.k3s.local
+    tls:
+      - secretName: grafana-tls
+        hosts:
+          - grafana.k3s.local
+  annotations:
+    cert-manager.io/cluster-issuer: k3s-local-ca-issuer
+  persistence:
+    enabled: true
+    storageClassName: longhorn
+    size: 5Gi
+
+prometheus:
+  prometheusSpec:
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: longhorn
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+alertmanager:
+  enabled: false
