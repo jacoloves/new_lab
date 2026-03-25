@@ -157,6 +157,13 @@ class Switch:
             )
             print(f"  MACアドレス: {mac_address} -> リンク先ノード: {linked_node}")
 
+    def print_link_states(self):
+        print(f"スイッチ {self.node_id} （root={self.is_root}）のリンク状態:")
+        for link in self.links:
+            state = self.link_states[link]
+            connected_node = link.node_x if link.node_x != self else link.node_y
+            print(f"  - リンク {self.node_id} - {connected_node.node_id}: 状態 {state}")
+
     def __str__(self):
         connected_nodes = [
             link.node_x.node_id

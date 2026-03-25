@@ -6,13 +6,14 @@ from collections import defaultdict
 
 
 class NetworkEventScheduler:
-    def __init__(self, log_enabled=False, verbose=False):
+    def __init__(self, log_enabled=False, verbose=False, stp_verbose=False):
         self.current_time = 0
         self.events = []
         self.event_id = 0
         self.packet_logs = {}
         self.log_enabled = log_enabled
         self.verbose = verbose
+        self.stp_verbose = stp_verbose
         self.graph = nx.Graph()
 
     def add_node(self, node_id, label):
@@ -54,7 +55,7 @@ class NetworkEventScheduler:
                     nodelist=[node],
                     node_color="red",
                     node_shape="s",
-                    node_size=2000,
+                    node_size=250,
                 )
             else:
                 nx.draw_networkx_nodes(
@@ -63,7 +64,7 @@ class NetworkEventScheduler:
                     nodelist=[node],
                     node_color="lightblue",
                     node_shape="o",
-                    node_size=2000,
+                    node_size=250,
                 )
 
         nx.draw_networkx_labels(
@@ -73,6 +74,59 @@ class NetworkEventScheduler:
             self.graph, pos, edge_labels=nx.get_edge_attributes(self.graph, "label")
         )
         plt.show()
+
+    def draw_with_link_states(self, switches):
+        pos = nx.spring_layout(self.graph)
+
+        for u, v in self.graph.edges():
+            link_state = self.get_link_state(u, v, switches)
+            color = "green" if link_state == "forwarding" else "red"
+            nx.draw_networkx_edges(
+                self.graph, pos, edgelist=[(u, v)], width=2, edge_color=color
+            )
+
+        for node, data in self.graph.nodes(data=True):
+            if "Switch" in data["label"]:
+                nx.draw_networkx_nodes(
+                    self.graph,
+                    pos,
+                    nodelist=[node],
+                    node_color="red",
+                    node_shape="s",
+                    node_size=250,
+                )
+            else:
+                nx.draw_networkx_nodes(
+                    self.graph,
+                    pos,
+                    nodelist=[node],
+                    node_color="lightblue",
+                    node_shape="o",
+                    node_size=250,
+                )
+
+        nx.draw_networkx_labels(
+            self.graph,
+            pos,
+            labels=nx.get_node_attributes(self.graph, "label"),
+            font_size=8,
+        )
+
+        plt.show()
+
+    def get_link_state(self, node1_id, node2_id, switches):
+        for switch in switches:
+            if switch.node_id == node1_id or switch.node_id == node2_id:
+                for link in switch.links:
+                    if (
+                        link.node_x.node_id == node1_id
+                        and link.node_y.node_id == node2_id
+                    ) or (
+                        link.node_x.node_id == node2_id
+                        and link.node_y.node_id == node1_id
+                    ):
+                        return switch.link_states.get(link, "unknown")
+        return "unknown"
 
     def schedule_event(self, event_time, callback, *args):
         event = (event_time, self.event_id, callback, args)
