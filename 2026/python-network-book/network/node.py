@@ -22,7 +22,7 @@ class Node:
         if link not in self.links:
             self.links.append(link)
 
-    def receive_packet(self, packet):
+    def receive_packet(self, packet, received_link):
         if packet.arrival_time == -1:
             self.network_event_scheduler.log_packet_info(packet, "lost", self.node_id)
             return
@@ -40,7 +40,7 @@ class Node:
     def send_packet(self, packet):
         self.network_event_scheduler.log_packet_info(packet, "sent", self.node_id)
         if packet.header["destination_mac"] == self.mac_address:
-            self.receive_packet(packet)
+            self.receive_packet(packet, received_link=None)
         else:
             for link in self.links:
                 next_node = link.node_x if self != link.node_x else link.node_y

@@ -22,10 +22,8 @@ class Link:
         self.packet_queue_yx = []
         self.current_queue_time_xy = 0
         self.current_queue_time_yx = 0
-
         node_x.add_link(self)
         node_y.add_link(self)
-
         label = f"{bandwidth / 1000000} Mbps, {delay} s"
         self.network_event_scheduler.add_link(
             node_x.node_id, node_y.node_id, label, self.bandwidth, self.delay
@@ -43,7 +41,6 @@ class Link:
         dequeue_time = self.network_event_scheduler.current_time + current_queue_time
         heapq.heappush(queue, (dequeue_time, packet, from_node))
         self.add_to_queue_time(from_node, packet_transfer_time)
-
         if len(queue) == 1:
             self.network_event_scheduler.schedule_event(
                 dequeue_time, self.transfer_packet, from_node
@@ -67,6 +64,7 @@ class Link:
                 self.network_event_scheduler.current_time + self.delay,
                 next_node.receive_packet,
                 packet,
+                self,
             )
             self.network_event_scheduler.schedule_event(
                 dequeue_time + packet_transfer_time,
