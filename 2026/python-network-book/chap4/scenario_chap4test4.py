@@ -5,7 +5,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from network import NetworkEventScheduler, Node, Link, Switch
 
-network_event_scheduler = NetworkEventScheduler(log_enabled=True, verbose=False, stp_verbose=True)
+network_event_scheduler = NetworkEventScheduler(
+    log_enabled=True, verbose=True, stp_verbose=False
+)
 
 node1 = Node(
     node_id="n1",
@@ -28,9 +30,9 @@ node4 = Node(
     network_event_scheduler=network_event_scheduler,
 )
 # pattern 1
-#switch1 = Switch(node_id="s1", network_event_scheduler=network_event_scheduler)
+switch1 = Switch(node_id="s1", network_event_scheduler=network_event_scheduler)
 # pattern 2
-switch1 = Switch(node_id="s9", network_event_scheduler=network_event_scheduler)
+# switch1 = Switch(node_id="s9", network_event_scheduler=network_event_scheduler)
 switch2 = Switch(node_id="s2", network_event_scheduler=network_event_scheduler)
 switch3 = Switch(node_id="s3", network_event_scheduler=network_event_scheduler)
 switch4 = Switch(node_id="s4", network_event_scheduler=network_event_scheduler)
@@ -119,9 +121,29 @@ link10 = Link(
 
 network_event_scheduler.draw()
 
+node1.set_traffic(
+    destination_mac="00:1A:2B:3C:4D:5F",
+    bitrate=1000,
+    start_time=1.0,
+    duration=5.0,
+    burstiness=1.0,
+    header_size=40,
+    payload_size=85,
+)
+
+node2.set_traffic(
+    destination_mac="00:1A:2B:3C:4D:5E",
+    bitrate=1000,
+    start_time=3.0,
+    duration=3.0,
+    burstiness=1.0,
+    header_size=40,
+    payload_size=85,
+)
+
 network_event_scheduler.run()
 
-switch1.print_link_states()
-switch2.print_link_states()
-switch3.print_link_states()
-switch4.print_link_states()
+switch1.print_forwarding_table()
+switch2.print_forwarding_table()
+switch3.print_forwarding_table()
+switch4.print_forwarding_table()
