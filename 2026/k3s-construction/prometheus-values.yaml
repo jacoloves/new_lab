@@ -11,20 +11,11 @@ grafana:
   annotations:
     cert-manager.io/cluster-issuer: k3s-local-ca-issuer
   persistence:
-    enabled: true
-    storageClassName: longhorn
-    size: 5Gi
+    enabled: false
 
 prometheus:
   prometheusSpec:
-    storageSpec:
-      volumeClaimTemplate:
-        spec:
-          storageClassName: longhorn
-          accessModes: ["ReadWriteOnce"]
-          resources:
-            requests:
-              storage: 10Gi
+    storageSpec: {}
 
 alertmanager:
   enabled: false
