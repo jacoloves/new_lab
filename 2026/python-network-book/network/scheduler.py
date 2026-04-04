@@ -6,7 +6,9 @@ from collections import defaultdict
 
 
 class NetworkEventScheduler:
-    def __init__(self, log_enabled=False, verbose=False, stp_verbose=False):
+    def __init__(
+        self, log_enabled=False, verbose=False, stp_verbose=False, routing_verbose=False
+    ):
         self.current_time = 0
         self.events = []
         self.event_id = 0
@@ -14,10 +16,11 @@ class NetworkEventScheduler:
         self.log_enabled = log_enabled
         self.verbose = verbose
         self.stp_verbose = stp_verbose
+        self.routing_verbose = routing_verbose
         self.graph = nx.Graph()
 
-    def add_node(self, node_id, label):
-        self.graph.add_node(node_id, label=label)
+    def add_node(self, node_id, label, ip_addresses=None):
+        self.graph.add_node(node_id, label=label, ip_addresses=ip_addresses)
 
     def add_link(self, node1_id, node2_id, label, bandwidth, delay):
         self.graph.add_edge(
@@ -31,7 +34,7 @@ class NetworkEventScheduler:
         def get_edge_color(delay):
             if delay <= 0.001:
                 return "green"
-            elif delay >= 0.01:
+            elif delay <= 0.01:
                 return "yellow"
             else:
                 return "red"
@@ -68,10 +71,16 @@ class NetworkEventScheduler:
                 )
 
         nx.draw_networkx_labels(
-            self.graph, pos, labels=nx.get_node_attributes(self.graph, "label")
+            self.graph,
+            pos,
+            labels=nx.get_node_attributes(self.graph, "label"),
+            font_size=8,
         )
         nx.draw_networkx_edge_labels(
-            self.graph, pos, edge_labels=nx.get_edge_attributes(self.graph, "label")
+            self.graph,
+            pos,
+            edge_labels=nx.get_edge_attributes(self.graph, "label"),
+            font_size=8,
         )
         plt.show()
 
@@ -92,6 +101,15 @@ class NetworkEventScheduler:
                     pos,
                     nodelist=[node],
                     node_color="red",
+                    node_shape="s",
+                    node_size=250,
+                )
+            elif "Router" in data["label"]:
+                nx.draw_networkx_nodes(
+                    self.graph,
+                    pos,
+                    nodelist=[node],
+                    node_color="orange",
                     node_shape="s",
                     node_size=250,
                 )
@@ -139,6 +157,8 @@ class NetworkEventScheduler:
                 self.packet_logs[packet.id] = {
                     "source_mac": packet.header["source_mac"],
                     "destination_mac": packet.header["destination_mac"],
+                    "source_ip": packet.header["source_ip"],
+                    "destination_ip": packet.header["destination_ip"],
                     "size": packet.size,
                     "creation_time": packet.creation_time,
                     "arrival_time": packet.arrival_time,
@@ -160,13 +180,13 @@ class NetworkEventScheduler:
 
             if self.verbose:
                 print(
-                    f"Time: {self.current_time} Node: {node_id}, Event: {event_type}, Packet: {packet.id}, Src: {packet.header['source_mac']}, Dst: {packet.header['destination_mac']}"
+                    f"Time: {self.current_time} Node: {node_id}, Event: {event_type}, Packet: {packet.id}, Src: {packet.header['source_ip']}, Dst: {packet.header['destination_ip']}"
                 )
 
     def print_packet_logs(self):
         for packet_id, log in self.packet_logs.items():
             print(
-                f"Packet ID: {packet_id} Src: {log['source_mac']} {log['creation_time']} -> Dst: {log['destination_mac']}{log['arrival_time']}"
+                f"Packet ID: {packet_id} Src: {log['source_ip']} {log['creation_time']} -> Dst: {log['destination_ip']}{log['arrival_time']}"
             )
 
             for event in log["events"]:

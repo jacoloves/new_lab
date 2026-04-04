@@ -1,6 +1,8 @@
 import heapq
 import random
 
+from .router import Router
+
 
 class Link:
     def __init__(
@@ -18,16 +20,79 @@ class Link:
         self.bandwidth = bandwidth
         self.delay = delay
         self.loss_rate = loss_rate
+
         self.packet_queue_xy = []
         self.packet_queue_yx = []
         self.current_queue_time_xy = 0
         self.current_queue_time_yx = 0
-        node_x.add_link(self)
-        node_y.add_link(self)
+
+        ip_x, ip_y = self.setup_link_ips(node_x, node_y)
+
+        if isinstance(node_x, Router):
+            node_x.add_link(self, ip_x)
+        else:
+            node_x.add_link(self)
+
+        if isinstance(node_y, Router):
+            node_y.add_link(self, ip_y)
+        else:
+            node_y.add_link(self)
+
         label = f"{bandwidth / 1000000} Mbps, {delay} s"
         self.network_event_scheduler.add_link(
             node_x.node_id, node_y.node_id, label, self.bandwidth, self.delay
         )
+
+    def setup_link_ips(self, node_x, node_y):
+        ip_list_x = self.get_available_ip_list(node_x)
+        ip_list_y = self.get_available_ip_list(node_y)
+
+        selected_ip_x, selected_ip_y = self.select_compatible_ip(ip_list_x, ip_list_y)
+        if selected_ip_x is None or selected_ip_y is None:
+            raise ValueError("互換性のある IP アドレスのペアが見つかりませんでした。")
+
+        node_x.mark_ip_as_used(selected_ip_x)
+        node_y.mark_ip_as_used(selected_ip_y)
+
+        return selected_ip_x, selected_ip_y
+
+    def get_available_ip_list(self, node):
+        if isinstance(node, Router):
+            return node.get_available_ip_addresses()
+        else:
+            return [node.ip_address]
+
+    def select_compatible_ip(self, ip_list_x, ip_list_y):
+        for ip_cidr_x in ip_list_x:
+            for ip_cidr_y in ip_list_y:
+                if self.is_compatible(ip_cidr_x, ip_cidr_y):
+                    return ip_cidr_x, ip_cidr_y
+        return None, None
+
+    def is_compatible(self, ip_cidr_x, ip_cidr_y):
+        ip_address_x, subnet_mask_x = ip_cidr_x.split("/")
+        ip_address_y, subnet_mask_y = ip_cidr_y.split("/")
+
+        mask_int_x = self.subnet_mask_to_int(subnet_mask_x)
+        mask_int_y = self.subnet_mask_to_int(subnet_mask_y)
+
+        network_x = self.ip_to_int(ip_address_x) & mask_int_x
+        network_y = self.ip_to_int(ip_address_y) & mask_int_y
+
+        return network_x == network_y
+
+    def get_network_address(self, ip_address, subnet_mask):
+        ip_addr_int = self.ip_to_int(ip_address)
+        mask_int = self.ip_to_int(subnet_mask)
+
+        return ip_addr_int & mask_int
+
+    def ip_to_int(self, ip_address):
+        octets = ip_address.split(".")
+        return sum(int(octet) << (8 * i) for i, octet in enumerate(reversed(octets)))
+
+    def subnet_mask_to_int(self, subnet_mask):
+        return (0xFFFFFFFF >> (32 - int(subnet_mask))) << (32 - int(subnet_mask))
 
     def enqueue_packet(self, packet, from_node):
         if from_node == self.node_x:
