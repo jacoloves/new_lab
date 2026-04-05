@@ -1,18 +1,49 @@
+import random
+from ipaddress import ip_network
+
+from .packet import HelloPacket, LSAPacket
+
+
 class Router:
-    def __init__(self, node_id, ip_address, network_event_scheduler):
+    def __init__(
+        self,
+        node_id,
+        ip_address,
+        network_event_scheduler,
+        hello_interval=10,
+        lsa_interval=10,
+        default_route=None,
+    ):
         self.network_event_scheduler = network_event_scheduler
         self.node_id = node_id
         self.links = []
         self.available_ips = {ip: False for ip in ip_address}
         self.interfaces = {}
         self.routing_table = {}
-        self.default_route = None
+        self.default_route = default_route
+        self.neighbors = {}
+        self.hello_interval = hello_interval
+        self.lsa_sequence_number = 0
+        self.lsa_interval = lsa_interval
+        self.lsa_database = {}
+        self.is_topology_initialized = False
+        self.topology_database = {}
         label = f"Router {node_id}"
-        self.network_event_scheduler.add_node(node_id, label)
+        self.network_event_scheduler.add_node(node_id, label, ip_addresses=ip_address)
+        self.schedule_hello_packet()
+        self.schedule_lsa()
+
+    def print_interfaces(self):
+        print(f"インタフェース情報（ルータ {self.node_id}）:")
+        for link, ip_address in self.interfaces.items():
+            print(f"  リンク: {link}, IPアドレス: {ip_address}")
 
     def add_link(self, link, ip_address=None):
         if link not in self.interfaces:
             self.interfaces[link] = ip_address
+
+        if ip_address:
+            self.add_route(ip_address, "Directly connected", link)
 
     def mark_ip_as_used(self, ip_address):
         if ip_address in self.available_ips:
@@ -26,20 +57,124 @@ class Router:
     def add_route(self, destination_cidr, next_hop, link):
         self.routing_table[destination_cidr] = (next_hop, link)
 
+    def get_route(self, destination_ip):
+        if destination_ip == "224.0.0.5":
+            return "multicast", None
+
+        for network_cidr, route_info in self.routing_table.items():
+            if "/" in network_cidr:
+                network_address, mask_length = network_cidr.split("/")
+                subnet_mask = self.cidr_to_subnet_mask(mask_length)
+                if self.matches_subnet(destination_ip, network_address, subnet_mask):
+                    next_hop, link = route_info
+                    return next_hop, link
+            else:
+                print(f"Warning: Invalid CIDR format in routing table: {network_cidr}")
+
+        return None, None
+
     def matches_subnet(self, ip_address, network_address, subnet_mask):
-        ip_addr_int = self.ip_to_int(ip_address)
+        ip_addr_only = ip_address.split("/")[0] if "/" in ip_address else ip_address
+        ip_addr_int = self.ip_to_int(ip_addr_only)
         network_int = self.ip_to_int(network_address)
         mask_int = self.ip_to_int(subnet_mask)
 
         network_subnet = network_int & mask_int
-
         return ip_addr_int & mask_int == network_subnet
+
+    def schedule_hello_packet(self):
+        initial_delay = random.uniform(0, 0.1)
+        self.network_event_scheduler.schedule_event(
+            self.network_event_scheduler.current_time + initial_delay,
+            self.send_hello_packet,
+        )
+
+    def schedule_lsa(self):
+        initial_delay = random.uniform(0.3, 0.5)
+        self.network_event_scheduler.schedule_event(
+            self.network_event_scheduler.current_time + initial_delay, self.send_lsa
+        )
+
+    def send_hello_packet(self):
+        for link, interface_cidr in self.interfaces.items():
+            network_address, mask_length = interface_cidr.split("/")
+            hello_packet = HelloPacket(
+                source_mac="00:00:00:00:00:00",
+                source_ip=network_address,
+                network_mask=self.cidr_to_subnet_mask(mask_length),
+                router_id=self.node_id,
+                hello_interval=self.hello_interval,
+                neighbors=list(self.neighbors.keys()),
+                network_event_scheduler=self.network_event_scheduler,
+            )
+            link.enqueue_packet(hello_packet, self)
+
+        self.network_event_scheduler.schedule_event(
+            self.network_event_scheduler.current_time + self.hello_interval,
+            self.send_hello_packet,
+        )
+
+    def send_lsa(self):
+        seq_number = self.increment_lsa_sequence_number()
+
+        link_state_info = self.get_link_state_info()
+
+        for link, ip_address in self.interfaces.items():
+            source_ip = ip_address
+            lsa_packet = LSAPacket(
+                source_mac="00:00:00:00:00:00",
+                source_ip=source_ip,
+                router_id=self.node_id,
+                sequence_number=seq_number,
+                link_state_info=link_state_info,
+                network_event_scheduler=self.network_event_scheduler
+            )
+            link.enqueue_packet(lsa_packet, self)
+
+        self.network_event_scheduler.schedule_event(
+            self.network_event_scheduler.current_time + self.lsa_interval,
+            self.send_lsa
+        )
+
+    def flood_lsa(self, original_lsa_packet):
+        original_sender_id = original_lsa_packet.payload["router_id"]
+
+        for link, ip_address in self.interfaces.items():
+            if link.node_x.node_id != original_sender_id and link.node_y.node_id != original_sender_id:
+                lsa_packet = original_lsa_packet
+                link.enqueue_packet(lsa_packet, self)
+
+    def increment_lsa_sequence_number(self):
+        self.lsa_sequence_number += 1
+        return self.lsa_sequence_number
+
+    def get_link_state_info(self):
+        link_state_info = {}
+        for link, ip_address in self.interfaces.items():
+            link_state_info[link] = {
+                "ip_address": ip_address,
+                "cost": self.calculate_link_cost(link),
+                "state": self.get_link_state(link)
+            }
+        return link_state_info
+
+    def calculate_link_cost(self, link):
+        return 1 / link.bandwidth
+
+    def get_link_state(self, link):
+        return "active" if link.is_active else "inactive"
 
     def forward_packet(self, packet):
         destination_ip = packet.header["destination_ip"]
         next_hop, link = self.get_route(destination_ip)
 
-        if link:
+        if destination_ip == "224.0.0.5":
+            for link in self.interfaces.keys():
+                self.network_event_scheduler.log_packet_info(
+                    packet, "forwarded", self.node_id
+                )
+                link.enqueue_packet(packet, self)
+        elif link:
             self.network_event_scheduler.log_packet_info(
                 packet, "forwarded", self.node_id
             )
@@ -54,39 +189,201 @@ class Router:
                 packet, "dropped", self.node_id
             )
 
-    def get_route(self, destination_ip):
-        for network_cidr, (next_hop, link) in self.routing_table.items():
-            network_address, mask_length = network_cidr.split("/")
-            subnet_mask = self.cidr_to_subnet_mask(mask_length)
-
-            if self.matches_subnet(destination_ip, network_address, subnet_mask):
-                return next_hop, link
-
-        return None, None
-
     def cidr_to_network_address(self, cidr):
         network, mask_length = cidr.split("/")
         subnet_mask = self.cidr_mask_to_int(mask_length)
         return network, subnet_mask
 
     def receive_packet(self, packet, received_link):
-        destination_ip = packet.header["destination_ip"]
-        for link, interface_cidr in self.interfaces.items():
-            network_address, mask_length = interface_cidr.split("/")
-            subnet_mask = self.cidr_to_subnet_mask(mask_length)
-            if self.matches_subnet(destination_ip, network_address, subnet_mask):
-                if self.is_final_destination(packet, network_address):
-                    pass
-                else:
-                    self.forward_packet(packet)
-                return
-        self.forward_packet(packet)
+        if isinstance(packet, HelloPacket):
+            self.receive_hello_packet(packet, received_link)
+            return
+        elif isinstance(packet, LSAPacket):
+            self.receive_lsa(packet)
+            return
+
+        packet.header["ttl"] -= 1
+
+        if packet.header["ttl"] <= 0:
+            self.network_event_scheduler.log_packet_info(
+                packet, "dropped due to TTL expired", self.node_id
+            )
+            return
+        else:
+            destination_ip = packet.header["destination_ip"]
+            if "/" in destination_ip:
+                destination_ip, _ = destination_ip.split("/")
+            for link, interface_cidr in self.interfaces.items():
+                network_address, mask_length = interface_cidr.split("/")
+                subnet_mask = self.cidr_to_subnet_mask(mask_length)
+                if self.matches_subnet(destination_ip, network_address, subnet_mask):
+                    if self.is_final_destination(packet, network_address):
+                        pass
+                    else:
+                        self.forward_packet(packet)
+                    return
+            print(packet)
+            self.forward_packet(packet)
 
     def is_final_destination(self, packet, network_address):
-        return packet.header["destination_ip"] == network_address
+        destination_ip = packet.header["destination_ip"]
+        if "/" in destination_ip:
+            destination_ip, _ = destination_ip.split("/")
+        return destination_ip == network_address
 
     def process_packet(self, packet, received_link):
         print(f"Packet {packet.id} processed at router {self.node_id}")
+
+    def receive_hello_packet(self, packet, received_link):
+        router_id = packet.payload["router_id"]
+        new_neighbor = False
+        now = self.network_event_scheduler.current_time
+
+        if router_id not in self.neighbors:
+            new_neighbor = True
+            self.neighbors[router_id] = {
+                "last_hello_time": now,
+                "link": received_link,
+                "neighbor_info": packet.payload,
+            }
+        else:
+            last_hello_time = self.neighbors[router_id]["last_hello_time"]
+            if now > last_hello_time:
+                self.neighbors[router_id]["last_hello_time"] = now
+            if received_link != self.neighbors[router_id]["link"]:
+                new_neighbor = True
+                self.neighbors[router_id]["link"] = received_link
+            if packet.payload != self.neighbors[router_id]["neighbor_info"]:
+                new_neighbor = True
+                self.neighbors[router_id]["neighbor_info"] = packet.payload
+
+        if self.network_event_scheduler.routing_verbose:
+            if new_neighbor:
+                self.print_neighbor_info(now)
+            else:
+                print(
+                    f"{now} Helloパケットを受信しましたが、隣接ルータの情報は更新されていません（ルータ {self.node_id}）"
+                )
+
+    def print_neighbor_info(self, now):
+        print(f"{now} Helloパケット受信によるアップデート(ルータ {self.node_id}) :")
+        if not self.neighbors:
+            print("  隣接ルータはありません。")
+            return
+        for router_id, info in self.neighbors.items():
+            last_hello_time = info["last_hello_time"]
+            link = info["link"]
+            neighbor_info = info["neighbor_info"]
+            print(f"  ルータID: {router_id}")
+            print(f"    最後のHello受信時刻: {last_hello_time}")
+            print(f"    隣接ルータへのリンク: {link}")
+            print(f"    追加情報: {neighbor_info}")
+
+    def receive_lsa(self, lsa_packet):
+        lsa_info = lsa_packet.payload["link_state_info"]
+        now = self.network_event_scheduler.current_time
+
+        if not self.is_topology_initialized:
+            self.initialize_topology_database()
+            self.is_topology_initialized = True
+
+        if "sequence_number" in lsa_packet.payload:
+            seq_number = lsa_packet.payload["sequence_number"]
+            current_lsa_info = self.topology_database.get(lsa_packet.payload["router_id"], {})
+
+            if seq_number > current_lsa_info.get("sequence_number", -1):
+                self.topology_database[lsa_packet.payload["router_id"]] = {
+                    "sequence_number": seq_number,
+                    "link_state_info": lsa_info
+                }
+
+                if self.network_event_scheduler.routing_verbose:
+                    self.print_topology_database(now)
+
+                self.flood_lsa(lsa_packet)
+
+        else:
+            if self.network_event_scheduler.routing_verbose:
+                print(f"{now} 古いLSAを受信しました（ルータ {self.node_id}）")
+    
+    def initialize_topology_database(self):
+        link_state_info = {}
+        for link, ip_address in self.interfaces.items():
+            link_state_info[link] = {
+                "ip_address": ip_address,
+                "cost": self.calculate_link_cost(link),
+                "state": "active"
+            }
+
+        self.topology_database = {
+            self.node_id: {'link_state_info': link_state_info}
+        }
+
+    def print_topology_database(self, now):
+        print(f"{now} トポロジデータベース（ルータ {self.node_id}）:")
+        for router_id, router_info in self.topology_database.items():
+            print(f"  ルータID: {router_id}")
+            link_state_info = router_info.get("link_state_info", {})
+            for link, info in link_state_info.items():
+                if isinstance(info, dict):
+                    print(f"    リンク: {link}")
+                    print(f"      IPアドレス: {info.get('ip_address')}")
+                    print(f"      コスト: {info.get('cost')}")
+                    print(f"      状態: {info.get('state')}")
+                else:
+                    print(f"    不正なデータ型: {info}")
+
+
+    def get_destination_cidr(self, router_id):
+        if router_id in self.topology_database:
+            link_info = self.topology_database[router_id]["link_state_info"]
+            for link, info in link_info.items():
+                return info["ip_address"]
+        return None
+
+    def is_same_network(self, cidr1, cidr2):
+        net1 = ip_network(cidr1, strict=False)
+        net2 = ip_network(cidr2, strict=False)
+        return net1.overlaps(net2)
+
+    def get_neighbor_router_id(self, link, current_router_id):
+        if link.node_x.node_id == current_router_id:
+            return link.node_y.node_id
+        elif link.node_y.node_id == current_router_id:
+            return link.node_x.node_id
+        else:
+            return None
+
+    def get_link_to_neighbor(self, neighbor_router_id):
+        if neighbor_router_id is None:
+            for link in self.links:
+                if (
+                    link.node_x.node_id == self.node_id
+                    or link.node_y.node_id == self.node_id
+                ):
+                    return link
+            return None
+
+        if neighbor_router_id in self.neighbors:
+            return self.neighbors[neighbor_router_id]["link"]
+
+        for link in self.links:
+            if (
+                link.node_x.node_id == neighbor_router_id
+                or link.node_y.node_id == neighbor_router_id
+            ):
+                return link
+
+        return None
+
+    def print_routing_table(self):
+        if self.network_event_scheduler.routing_verbose:
+            print(f"ルーティングテーブル（ルータ {self.node_id}）:")
+            for destination, route_info in self.routing_table.items():
+                next_hop, link = route_info
+                print(
+                    f"  宛先IPアドレス: {destination}, Next hop: {next_hop}, リンク: {link}"
+                )
 
     def ip_to_int(self, ip_address):
         octets = ip_address.split(".")

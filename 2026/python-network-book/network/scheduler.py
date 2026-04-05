@@ -104,15 +104,6 @@ class NetworkEventScheduler:
                     node_shape="s",
                     node_size=250,
                 )
-            elif "Router" in data["label"]:
-                nx.draw_networkx_nodes(
-                    self.graph,
-                    pos,
-                    nodelist=[node],
-                    node_color="orange",
-                    node_shape="s",
-                    node_size=250,
-                )
             else:
                 nx.draw_networkx_nodes(
                     self.graph,
@@ -338,6 +329,6 @@ class NetworkEventScheduler:
 
     def run_until(self, end_time):
         while self.events and self.events[0][0] <= end_time:
-            event_time, _, callback, args = heapq.heappop(self.events)
+            event_time, event_id, callback, args = heapq.heappop(self.events)
             self.current_time = event_time
             callback(*args)

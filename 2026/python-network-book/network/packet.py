@@ -54,8 +54,8 @@ class BPDU(Packet):
         super().__init__(
             source_mac,
             destination_mac,
-            source_ip="0.0.0.0",
-            destination_ip="::",
+            source_ip="0.0.0.0/24",
+            destination_ip="0.0.0.0/24",
             ttl=64,
             fragment_flags={},
             fragment_offset=0,
@@ -71,3 +71,69 @@ class BPDU(Packet):
 
     def __str__(self):
         return f"BPDU(送信元: {self.header['source_mac']}, 宛先: {self.header['destination_mac']}, ルートID: {self.payload['root_id']}, ブリッジID: {self.payload['bridge_id']}, パスコスト: {self.payload['path_cost']})"
+
+
+class HelloPacket(Packet):
+    def __init__(
+        self,
+        source_mac,
+        source_ip,
+        network_mask,
+        router_id,
+        hello_interval,
+        neighbors,
+        network_event_scheduler,
+    ):
+        super().__init__(
+            source_mac=source_mac,
+            destination_mac="FF:FF:FF:FF:FF:FF",
+            source_ip=source_ip,
+            destination_ip="224.0.0.5",
+            ttl=1,
+            fragment_flags={},
+            fragment_offset=0,
+            header_size=24,
+            payload_size=20,
+            network_event_scheduler=network_event_scheduler,
+        )
+        self.payload = {
+            "network_mask": network_mask,
+            "router_id": router_id,
+            "hello_interval": hello_interval,
+            "neighbors": neighbors,
+        }
+
+    def __str__(self):
+        return f"HelloPacket(送信元MAC: {self.header['source_mac']}, 宛先MAC: {self.header['destination_mac']}, 送信元IP: {self.header['source_ip']}, ネットワークマスク: {self.payload['network_mask']}, ルータID: {self.payload['router_id']}, Helloインターバル: {self.payload['hello_interval']}, 隣接ルータ: {self.payload['neighbors']})"
+
+
+class LSAPacket(Packet):
+    def __init__(
+        self,
+        source_mac,
+        source_ip,
+        router_id,
+        sequence_number,
+        link_state_info,
+        network_event_scheduler,
+    ):
+        super().__init__(
+            source_mac=source_mac,
+            destination_mac="FF:FF:FF:FF:FF:FF",
+            source_ip=source_ip,
+            destination_ip="224.0.0.5",
+            ttl=1,
+            fragment_flags={},
+            fragment_offset=0,
+            header_size=24,
+            payload_size=100,
+            network_event_scheduler=network_event_scheduler,
+        )
+        self.payload = {
+            "router_id": router_id,
+            "sequence_number": sequence_number,
+            "link_state_info": link_state_info,
+        }
+
+    def __str__(self):
+        return f"LSAPacket(送信元MAC: {self.header['source_mac']}, 送信元IP: {self.header['source_ip']}, トポロジ情報: {self.payload['link_state_info']})"

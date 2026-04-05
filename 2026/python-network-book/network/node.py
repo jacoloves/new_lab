@@ -2,6 +2,7 @@ import re
 import uuid
 from ipaddress import ip_network
 from .packet import Packet
+from .router import Router
 
 
 class Node:
@@ -29,7 +30,7 @@ class Node:
         self.fragmented_packets = {}
         self.default_route = default_route
         label = f"Node {node_id}\n{mac_address}"
-        self.network_event_scheduler.add_node(node_id, label)
+        self.network_event_scheduler.add_node(node_id, label, ip_addresses=[ip_address])
 
     def is_valid_mac_address(self, mac_address):
         mac_format = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$")
@@ -42,7 +43,7 @@ class Node:
         except ValueError:
             return False
 
-    def add_link(self, link):
+    def add_link(self, link, ip_address=None):
         if link not in self.links:
             self.links.append(link)
 
@@ -55,8 +56,7 @@ class Node:
             return
 
         if packet.header["destination_mac"] == self.mac_address:
-            node_ip_address = self.ip_address.split("/")[0]
-            if packet.header["destination_ip"] == node_ip_address:
+            if packet.header["destination_ip"] == self.ip_address.split("/")[0]:
                 self.network_event_scheduler.log_packet_info(
                     packet, "arrived", self.node_id
                 )
@@ -67,7 +67,9 @@ class Node:
                 else:
                     self._reassemble_and_process_packet(packet)
             else:
-                pass
+                self.network_event_scheduler.log_packet_info(
+                    packet, "dropped", self.node_id
+                )
 
     def _store_fragment(self, fragment):
         original_data_id = fragment.header["fragment_flags"]["original_data_id"]
@@ -199,6 +201,46 @@ class Node:
                 )
 
         self.network_event_scheduler.schedule_event(start_time, generate_packet)
+
+    def print_route(self, destination_ip):
+        paths = []
+        neighbors = []
+        if self.default_route is not None:
+            next_link = self.default_route
+            neighbor = (
+                next_link.node_x if self != next_link.node_x else next_link.node_y
+            )
+            neighbors.append(neighbor)
+        else:
+            for link in self.links:
+                neighbor = link.node_x if self != link.node_x else link.node_y
+                neighbors.append(neighbor)
+
+        paths.append(self.node_id)
+
+        for neighbor in neighbors:
+            next_node = neighbor
+            while isinstance(next_node, Router):
+                paths.append(next_node.node_id)
+                next_hop_id, next_link = next_node.get_route(destination_ip)
+                next_hop = (
+                    next_link.node_x
+                    if next_node != next_link.node_x
+                    else next_link.node_y
+                )
+                next_node = next_hop
+            else:
+                if next_node.ip_address == destination_ip:
+                    paths.append(next_node.node_id)
+
+        print("----------------------------------------")
+        print("Forwarding path from ", self.ip_address, " to ", destination_ip)
+        for index, node in enumerate(paths):
+            if index == len(paths) - 1:
+                print(node)
+            else:
+                print(node, end=" -> ")
+        print("----------------------------------------")
 
     def __str__(self):
         connected_nodes = [

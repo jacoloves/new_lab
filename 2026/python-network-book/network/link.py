@@ -20,6 +20,7 @@ class Link:
         self.bandwidth = bandwidth
         self.delay = delay
         self.loss_rate = loss_rate
+        self.is_active = True
 
         self.packet_queue_xy = []
         self.packet_queue_yx = []
@@ -28,20 +29,16 @@ class Link:
 
         ip_x, ip_y = self.setup_link_ips(node_x, node_y)
 
-        if isinstance(node_x, Router):
-            node_x.add_link(self, ip_x)
-        else:
-            node_x.add_link(self)
-
-        if isinstance(node_y, Router):
-            node_y.add_link(self, ip_y)
-        else:
-            node_y.add_link(self)
+        node_x.add_link(self, ip_x)
+        node_y.add_link(self, ip_y)
 
         label = f"{bandwidth / 1000000} Mbps, {delay} s"
         self.network_event_scheduler.add_link(
             node_x.node_id, node_y.node_id, label, self.bandwidth, self.delay
         )
+
+    def set_active(self, active):
+        self.is_active = active
 
     def setup_link_ips(self, node_x, node_y):
         ip_list_x = self.get_available_ip_list(node_x)
