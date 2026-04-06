@@ -1,3 +1,4 @@
+import heapq
 import random
 from ipaddress import ip_network
 
@@ -127,20 +128,22 @@ class Router:
                 router_id=self.node_id,
                 sequence_number=seq_number,
                 link_state_info=link_state_info,
-                network_event_scheduler=self.network_event_scheduler
+                network_event_scheduler=self.network_event_scheduler,
             )
             link.enqueue_packet(lsa_packet, self)
 
         self.network_event_scheduler.schedule_event(
-            self.network_event_scheduler.current_time + self.lsa_interval,
-            self.send_lsa
+            self.network_event_scheduler.current_time + self.lsa_interval, self.send_lsa
         )
 
     def flood_lsa(self, original_lsa_packet):
         original_sender_id = original_lsa_packet.payload["router_id"]
 
         for link, ip_address in self.interfaces.items():
-            if link.node_x.node_id != original_sender_id and link.node_y.node_id != original_sender_id:
+            if (
+                link.node_x.node_id != original_sender_id
+                and link.node_y.node_id != original_sender_id
+            ):
                 lsa_packet = original_lsa_packet
                 link.enqueue_packet(lsa_packet, self)
 
@@ -154,7 +157,7 @@ class Router:
             link_state_info[link] = {
                 "ip_address": ip_address,
                 "cost": self.calculate_link_cost(link),
-                "state": self.get_link_state(link)
+                "state": self.get_link_state(link),
             }
         return link_state_info
 
@@ -289,35 +292,37 @@ class Router:
 
         if "sequence_number" in lsa_packet.payload:
             seq_number = lsa_packet.payload["sequence_number"]
-            current_lsa_info = self.topology_database.get(lsa_packet.payload["router_id"], {})
+            current_lsa_info = self.topology_database.get(
+                lsa_packet.payload["router_id"], {}
+            )
 
             if seq_number > current_lsa_info.get("sequence_number", -1):
                 self.topology_database[lsa_packet.payload["router_id"]] = {
                     "sequence_number": seq_number,
-                    "link_state_info": lsa_info
+                    "link_state_info": lsa_info,
                 }
 
                 if self.network_event_scheduler.routing_verbose:
                     self.print_topology_database(now)
+
+                self.update_routing_table_with_dijkstra()
 
                 self.flood_lsa(lsa_packet)
 
         else:
             if self.network_event_scheduler.routing_verbose:
                 print(f"{now} 古いLSAを受信しました（ルータ {self.node_id}）")
-    
+
     def initialize_topology_database(self):
         link_state_info = {}
         for link, ip_address in self.interfaces.items():
             link_state_info[link] = {
                 "ip_address": ip_address,
                 "cost": self.calculate_link_cost(link),
-                "state": "active"
+                "state": "active",
             }
 
-        self.topology_database = {
-            self.node_id: {'link_state_info': link_state_info}
-        }
+        self.topology_database = {self.node_id: {"link_state_info": link_state_info}}
 
     def print_topology_database(self, now):
         print(f"{now} トポロジデータベース（ルータ {self.node_id}）:")
@@ -332,6 +337,90 @@ class Router:
                     print(f"      状態: {info.get('state')}")
                 else:
                     print(f"    不正なデータ型: {info}")
+
+    def calculate_shortest_paths(self, start_router_id):
+        shortest_paths = {
+            router_id: float("inf") for router_id in self.topology_database
+        }
+        shortest_paths[start_router_id] = 0
+        previous_nodes = {router_id: None for router_id in self.topology_database}
+
+        queue = [(0, start_router_id)]
+        while queue:
+            current_cost, current_router_id = heapq.heappop(queue)
+
+            if current_router_id in self.topology_database:
+                for link, link_info in self.topology_database[current_router_id][
+                    "link_state_info"
+                ].items():
+                    neighbor_router_id = self.get_neighbor_router_id(
+                        link, current_router_id
+                    )
+                    if (
+                        neighbor_router_id
+                        and neighbor_router_id in self.topology_database
+                    ):
+                        new_cost = current_cost + link_info["cost"]
+                        if new_cost < shortest_paths[neighbor_router_id]:
+                            shortest_paths[neighbor_router_id] = new_cost
+                            previous_nodes[neighbor_router_id] = current_router_id
+                            heapq.heappush(queue, (new_cost, neighbor_router_id))
+
+        return shortest_paths, previous_nodes
+
+    def find_initial_hop(self, destination, previous_nodes, start_router_id):
+        current_node = destination
+        while current_node is not None:
+            if previous_nodes.get(current_node) == start_router_id:
+                return current_node
+            current_node = previous_nodes.get(current_node)
+
+        print(f"Error: No valid path from {start_router_id} to {destination} found.")
+        return None
+
+    def update_routing_table_with_dijkstra(self):
+        shortest_paths, previous_nodes = self.calculate_shortest_paths(self.node_id)
+
+        temp_routing_table = {}
+
+        for destination, _ in shortest_paths.items():
+            if destination != self.node_id:
+                next_hop = self.find_initial_hop(destination, previous_nodes, self.node_id)
+                link_to_next_hop = self.get_link_to_neighbor(next_hop) if next_hop else None
+                if self.network_event_scheduler.routing_verbose:
+                    print(f"From {self.node_id} to {destination}: previous_nodes: {previous_nodes.get(destination)}, next_hop:{next_hop}, link: {link_to_next_hop}")
+
+                for intf_info in self.topology_database[destination]['link_state_info'].values():
+                    destination_cidr = intf_info['ip_address']
+                    network = ip_network(destination_cidr, strict=False)
+                    network_cidr = str(network)
+
+                    if link_to_next_hop:
+                        directly_connected = any(self.is_same_network(destination_cidr, ip_address) for _, ip_address in self.interfaces.items())
+                        if directly_connected:
+                            connection_type = "Directly connected"
+                        else:
+                            connection_type = f"{next_hop}" if next_hop else "Unknown"
+
+                        temp_routing_table[network_cidr] = (connection_type, link_to_next_hop)
+
+        for link, interface_cidr in self.interfaces.items():
+            network = ip_network(interface_cidr, strict=False)
+            network_cidr = str(network)
+            if network_cidr not in temp_routing_table or temp_routing_table[network_cidr][0] is None:
+                temp_routing_table[network_cidr] = ("Directly connected", link)
+
+        self.routing_table.clear()
+        for destination_cidr, (connection_type, link) in temp_routing_table.items():
+            self.routing_table[destination_cidr] = (connection_type, link)
+
+        if self.network_event_scheduler.routing_verbose:
+            print(f"Updated Routeing Table for Router {self.node_id}:")
+            for destination_cidr, (connection_type, link) in self.routing_table.items():
+                if "Directly connected" in connection_type:
+                    print(f"  Destination: {destination_cidr}, {connection_type}, Link: {link}")
+                else:
+                    print(f"  Destination: {destination_cidr}, Next hop: {connection_type.replace('via ', '')}, Link: {link}")
 
 
     def get_destination_cidr(self, router_id):
@@ -381,8 +470,16 @@ class Router:
             print(f"ルーティングテーブル（ルータ {self.node_id}）:")
             for destination, route_info in self.routing_table.items():
                 next_hop, link = route_info
+                
+                if next_hop is None:
+                    connection_status = "Directly connected"
+                    link_description = f", リンク: {link}" if link else ""
+                else:
+                    connection_status = f"Next hop: {next_hop}"
+                    link_description = f", リンク: {link}" if link else ", リンク情報なし"
+
                 print(
-                    f"  宛先IPアドレス: {destination}, Next hop: {next_hop}, リンク: {link}"
+                    f"  宛先IPアドレス: {destination}, {connection_status}{link_description}"
                 )
 
     def ip_to_int(self, ip_address):
