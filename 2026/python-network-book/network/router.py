@@ -1,6 +1,7 @@
 import heapq
 import random
 from ipaddress import ip_network
+import uuid
 
 from .packet import HelloPacket, LSAPacket
 
@@ -20,7 +21,9 @@ class Router:
         self.links = []
         self.available_ips = {ip: False for ip in ip_address}
         self.interfaces = {}
+        self.mac_addresses = {}
         self.routing_table = {}
+        self.arp_table = {}
         self.default_route = default_route
         self.neighbors = {}
         self.hello_interval = hello_interval
@@ -36,15 +39,44 @@ class Router:
 
     def print_interfaces(self):
         print(f"インタフェース情報（ルータ {self.node_id}）:")
-        for link, ip_address in self.interfaces.items():
-            print(f"  リンク: {link}, IPアドレス: {ip_address}")
+        for interface, ip_address in self.interfaces.items():
+            mac_address = sef.get_mac_address(interface)
+            print(
+                f"  インタフェース: {interface}, IPアドレス: {ip_address}, MACアドレス: {mac_address}"
+            )
 
     def add_link(self, link, ip_address=None):
         if link not in self.interfaces:
             self.interfaces[link] = ip_address
+            self.mac_addresses[link] = self.generate_mac_address()
 
         if ip_address:
             self.add_route(ip_address, "Directly connected", link)
+
+    def generate_mac_address(self):
+        return ":".join(
+            [
+                "{:02x}".format(uuid.uuid4().int >> elements & 0xFF)
+                for elements in range(0, 12, 2)
+            ]
+        )
+
+    def get_mac_address(self, interface):
+        return self.mac_addresses.get(interface, None)
+
+    def get_ip_address(self, interface):
+        return self.interfaces[interface]
+
+    def add_to_arp_table(self, ip_address, mac_address):
+        self.arp_table[ip_address] = mac_address
+
+    def get_mac_address_from_ip(self, ip_address):
+        return self.arp_table.get(ip_address, None)
+
+    def print_arp_table(self):
+        print(f"ARPテーブル（ルータ {self.node_id}）:")
+        for ip_address, mac_address in self.arp_table.items():
+            print(f"IPアドレス: {ip_address} -> MACアドレス: {mac_address}")
 
     def mark_ip_as_used(self, ip_address):
         if ip_address in self.available_ips:
@@ -100,7 +132,7 @@ class Router:
         for link, interface_cidr in self.interfaces.items():
             network_address, mask_length = interface_cidr.split("/")
             hello_packet = HelloPacket(
-                source_mac="00:00:00:00:00:00",
+                source_mac=self.get_mac_address(link),
                 source_ip=network_address,
                 network_mask=self.cidr_to_subnet_mask(mask_length),
                 router_id=self.node_id,
@@ -123,7 +155,7 @@ class Router:
         for link, ip_address in self.interfaces.items():
             source_ip = ip_address
             lsa_packet = LSAPacket(
-                source_mac="00:00:00:00:00:00",
+                source_mac=self.get_mac_address(link),
                 source_ip=source_ip,
                 router_id=self.node_id,
                 sequence_number=seq_number,
@@ -137,6 +169,8 @@ class Router:
         )
 
     def flood_lsa(self, original_lsa_packet):
+        link_state_info = self.get_link_state_info()
+
         original_sender_id = original_lsa_packet.payload["router_id"]
 
         for link, ip_address in self.interfaces.items():
@@ -145,6 +179,7 @@ class Router:
                 and link.node_y.node_id != original_sender_id
             ):
                 lsa_packet = original_lsa_packet
+                lsa_packet.header["source_mac"] = self.get_mac_address(link)
                 link.enqueue_packet(lsa_packet, self)
 
     def increment_lsa_sequence_number(self):
@@ -176,15 +211,27 @@ class Router:
                 self.network_event_scheduler.log_packet_info(
                     packet, "forwarded", self.node_id
                 )
+                packet.header["source_mac"] = self.get_mac_address(link)
+                packet.header["destination_mac"] = self.get_mac_address_from_ip(
+                    packet.header["destination_ip"]
+                )
                 link.enqueue_packet(packet, self)
         elif link:
             self.network_event_scheduler.log_packet_info(
                 packet, "forwarded", self.node_id
             )
+            packet.header["source_mac"] = self.get_mac_address(link)
+            packet.header["destination_mac"] = self.get_mac_address_from_ip(
+                packet.header["destination_ip"]
+            )
             link.enqueue_packet(packet, self)
         elif self.default_route:
             self.network_event_scheduler.log_packet_info(
                 packet, "forwarded via default route", self.node_id
+            )
+            packet.header["source_mac"] = self.get_mac_address(link)
+            packet.header["destination_mac"] = self.get_mac_address_from_ip(
+                packet.header["destination_ip"]
             )
             self.default_route.enqueue_packet(packet, self)
         else:
@@ -204,6 +251,11 @@ class Router:
         elif isinstance(packet, LSAPacket):
             self.receive_lsa(packet)
             return
+        elif isinstance(packet, BPDU):
+            self.network_event_scheduler.log_packet_info(
+                packet, "dropped BPDU", self.node_id
+            )
+            return
 
         packet.header["ttl"] -= 1
 
@@ -213,20 +265,29 @@ class Router:
             )
             return
         else:
-            destination_ip = packet.header["destination_ip"]
-            if "/" in destination_ip:
-                destination_ip, _ = destination_ip.split("/")
-            for link, interface_cidr in self.interfaces.items():
-                network_address, mask_length = interface_cidr.split("/")
-                subnet_mask = self.cidr_to_subnet_mask(mask_length)
-                if self.matches_subnet(destination_ip, network_address, subnet_mask):
-                    if self.is_final_destination(packet, network_address):
-                        pass
-                    else:
-                        self.forward_packet(packet)
-                    return
-            print(packet)
-            self.forward_packet(packet)
+            if packet.header["destination_mac"] == self.get_mac_address(received_link):
+                self.network_event_scheduler.log_packet_info(
+                    packet, "received", self.node_id
+                )
+                destination_ip = packet.header["destination_ip"]
+                if "/" in destination_ip:
+                    destination_ip, _ = destination_ip.split("/")
+                for link, interface_cidr in self.interfaces.items():
+                    network_address, mask_length = interface_cidr.split("/")
+                    subnet_mask = self.cidr_to_subnet_mask(mask_length)
+                    if self.matches_subnet(
+                        destination_ip, network_address, subnet_mask
+                    ):
+                        if self.is_final_destination(packet, network_address):
+                            pass
+                        else:
+                            self.forward_packet(packet)
+                        return
+                self.forward_packet(packet)
+            else:
+                self.network_event_scheduler.log_packet_info(
+                    packet, "dropped due to unmatched MAC address", self.node_id
+                )
 
     def is_final_destination(self, packet, network_address):
         destination_ip = packet.header["destination_ip"]
@@ -385,29 +446,46 @@ class Router:
 
         for destination, _ in shortest_paths.items():
             if destination != self.node_id:
-                next_hop = self.find_initial_hop(destination, previous_nodes, self.node_id)
-                link_to_next_hop = self.get_link_to_neighbor(next_hop) if next_hop else None
+                next_hop = self.find_initial_hop(
+                    destination, previous_nodes, self.node_id
+                )
+                link_to_next_hop = (
+                    self.get_link_to_neighbor(next_hop) if next_hop else None
+                )
                 if self.network_event_scheduler.routing_verbose:
-                    print(f"From {self.node_id} to {destination}: previous_nodes: {previous_nodes.get(destination)}, next_hop:{next_hop}, link: {link_to_next_hop}")
+                    print(
+                        f"From {self.node_id} to {destination}: previous_nodes: {previous_nodes.get(destination)}, next_hop:{next_hop}, link: {link_to_next_hop}"
+                    )
 
-                for intf_info in self.topology_database[destination]['link_state_info'].values():
-                    destination_cidr = intf_info['ip_address']
+                for intf_info in self.topology_database[destination][
+                    "link_state_info"
+                ].values():
+                    destination_cidr = intf_info["ip_address"]
                     network = ip_network(destination_cidr, strict=False)
                     network_cidr = str(network)
 
                     if link_to_next_hop:
-                        directly_connected = any(self.is_same_network(destination_cidr, ip_address) for _, ip_address in self.interfaces.items())
+                        directly_connected = any(
+                            self.is_same_network(destination_cidr, ip_address)
+                            for _, ip_address in self.interfaces.items()
+                        )
                         if directly_connected:
                             connection_type = "Directly connected"
                         else:
                             connection_type = f"{next_hop}" if next_hop else "Unknown"
 
-                        temp_routing_table[network_cidr] = (connection_type, link_to_next_hop)
+                        temp_routing_table[network_cidr] = (
+                            connection_type,
+                            link_to_next_hop,
+                        )
 
         for link, interface_cidr in self.interfaces.items():
             network = ip_network(interface_cidr, strict=False)
             network_cidr = str(network)
-            if network_cidr not in temp_routing_table or temp_routing_table[network_cidr][0] is None:
+            if (
+                network_cidr not in temp_routing_table
+                or temp_routing_table[network_cidr][0] is None
+            ):
                 temp_routing_table[network_cidr] = ("Directly connected", link)
 
         self.routing_table.clear()
@@ -418,10 +496,13 @@ class Router:
             print(f"Updated Routeing Table for Router {self.node_id}:")
             for destination_cidr, (connection_type, link) in self.routing_table.items():
                 if "Directly connected" in connection_type:
-                    print(f"  Destination: {destination_cidr}, {connection_type}, Link: {link}")
+                    print(
+                        f"  Destination: {destination_cidr}, {connection_type}, Link: {link}"
+                    )
                 else:
-                    print(f"  Destination: {destination_cidr}, Next hop: {connection_type.replace('via ', '')}, Link: {link}")
-
+                    print(
+                        f"  Destination: {destination_cidr}, Next hop: {connection_type.replace('via ', '')}, Link: {link}"
+                    )
 
     def get_destination_cidr(self, router_id):
         if router_id in self.topology_database:
@@ -470,13 +551,15 @@ class Router:
             print(f"ルーティングテーブル（ルータ {self.node_id}）:")
             for destination, route_info in self.routing_table.items():
                 next_hop, link = route_info
-                
+
                 if next_hop is None:
                     connection_status = "Directly connected"
                     link_description = f", リンク: {link}" if link else ""
                 else:
                     connection_status = f"Next hop: {next_hop}"
-                    link_description = f", リンク: {link}" if link else ", リンク情報なし"
+                    link_description = (
+                        f", リンク: {link}" if link else ", リンク情報なし"
+                    )
 
                 print(
                     f"  宛先IPアドレス: {destination}, {connection_status}{link_description}"

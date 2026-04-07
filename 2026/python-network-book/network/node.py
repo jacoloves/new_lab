@@ -15,17 +15,22 @@ class Node:
         mtu=1500,
         default_route=None,
     ):
-        if not self.is_valid_mac_address(mac_address):
-            raise ValueError("無効なMACアドレス形式です。")
-
         if not self.is_valid_cidr_notation(ip_address):
             raise ValueError("無効なIPアドレス形式です。")
 
         self.network_event_scheduler = network_event_scheduler
         self.node_id = node_id
-        self.mac_address = mac_address
+        if mac_address is None:
+            self.mac_address = (
+                self.generate_mac_address()
+            )
+        else:
+            if not self.is_valid_mac_address(mac_address)
+                raise ValueError("無効なMACアドレス形式です。")
+            self.mac_address = mac_address
         self.ip_address = ip_address
         self.links = []
+        self.arp_table
         self.mtu = mtu
         self.fragmented_packets = {}
         self.default_route = default_route
@@ -46,6 +51,25 @@ class Node:
     def add_link(self, link, ip_address=None):
         if link not in self.links:
             self.links.append(link)
+
+    def generate_mac_address(self):
+        return ":".join(
+            [
+                "{:02x}".format(uuid.uuid4().int >> elements & 0xFF)
+                for elements in range(0, 12, 2)
+            ]
+        )
+
+    def add_to_arp_table(self, ip_address, mac_address):
+        self.arp_table.get(ip_address, None)
+
+    def get_mac_address_from_ip(self, ip_address):
+        return self.arp_table.get(ip_address, None)
+
+    def print_arp_table(self):
+        print(f"ARPテーブル(ルータ {self.node_id}) :")
+        for ip_address, mac_address in self.arp_table.items():
+            print(f"IPアドレス: {ip_address} -> MACアドレス: {mac_address}")
 
     def mark_ip_as_used(self, ip_address):
         pass
@@ -130,6 +154,7 @@ class Node:
         payload_size = self.mtu - header_size
         total_size = len(data)
         offset = 0
+        destination_mac = self.get_mac_address_from_ip(destination_ip)
 
         original_data_id = str(uuid.uuid4())
 
@@ -177,7 +202,7 @@ class Node:
 
     def set_traffic(
         self,
-        destination_mac,
+        # destination_mac,
         destination_ip,
         bitrate,
         start_time,
@@ -186,6 +211,7 @@ class Node:
         payload_size,
         burstiness=1.0,
     ):
+        destination_mac = self.get_mac_address_from_ip(destination_ip)
         end_time = start_time + duration
 
         def generate_packet():
