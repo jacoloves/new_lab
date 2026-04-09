@@ -17,9 +17,8 @@ class Packet:
     ):
         self.network_event_scheduler = network_event_scheduler
         self.id = str(uuid.uuid4())
-        self.header = {
-            "source_mac": source_mac,
-            "destination_mac": destination_mac,
+        self.mac_header = {"source_mac": source_mac, "destination_mac": destination_mac}
+        self.ip_header = {
             "source_ip": source_ip,
             "destination_ip": destination_ip,
             "ttl": ttl,
@@ -30,6 +29,16 @@ class Packet:
         self.size = header_size + payload_size
         self.creation_time = self.network_event_scheduler.current_time
         self.arrival_time = None
+
+    @property
+    def header(self):
+        return {**self.mac_header, **self.ip_header}
+
+    def remove_mac_header(self):
+        self.mac_header = {}
+
+    def add_mac_header(self, source_mac, destination_mac):
+        self.mac_header = {"source_mac": source_mac, "destination_mac": destination_mac}
 
     def set_arrived(self, arrival_time):
         self.arrival_time = arrival_time
@@ -52,11 +61,11 @@ class BPDU(Packet):
         network_event_scheduler,
     ):
         super().__init__(
-            source_mac,
-            destination_mac,
+            source_mac=source_mac,
+            destination_mac=destination_mac,
             source_ip="0.0.0.0/24",
             destination_ip="0.0.0.0/24",
-            ttl=64,
+            ttl=1,
             fragment_flags={},
             fragment_offset=0,
             header_size=20,

@@ -3,7 +3,7 @@ import random
 from ipaddress import ip_network
 import uuid
 
-from .packet import HelloPacket, LSAPacket
+from .packet import BPDU, HelloPacket, LSAPacket
 
 
 class Router:
@@ -40,7 +40,7 @@ class Router:
     def print_interfaces(self):
         print(f"インタフェース情報（ルータ {self.node_id}）:")
         for interface, ip_address in self.interfaces.items():
-            mac_address = sef.get_mac_address(interface)
+            mac_address = self.get_mac_address(interface)
             print(
                 f"  インタフェース: {interface}, IPアドレス: {ip_address}, MACアドレス: {mac_address}"
             )
@@ -208,36 +208,24 @@ class Router:
 
         if destination_ip == "224.0.0.5":
             for link in self.interfaces.keys():
-                self.network_event_scheduler.log_packet_info(
-                    packet, "forwarded", self.node_id
-                )
-                packet.header["source_mac"] = self.get_mac_address(link)
-                packet.header["destination_mac"] = self.get_mac_address_from_ip(
-                    packet.header["destination_ip"]
-                )
-                link.enqueue_packet(packet, self)
+                self.process_and_enqueue_packet(packet, link)
         elif link:
-            self.network_event_scheduler.log_packet_info(
-                packet, "forwarded", self.node_id
-            )
-            packet.header["source_mac"] = self.get_mac_address(link)
-            packet.header["destination_mac"] = self.get_mac_address_from_ip(
-                packet.header["destination_ip"]
-            )
-            link.enqueue_packet(packet, self)
+            self.process_and_enqueue_packet(packet, link)
         elif self.default_route:
-            self.network_event_scheduler.log_packet_info(
-                packet, "forwarded via default route", self.node_id
-            )
-            packet.header["source_mac"] = self.get_mac_address(link)
-            packet.header["destination_mac"] = self.get_mac_address_from_ip(
-                packet.header["destination_ip"]
-            )
-            self.default_route.enqueue_packet(packet, self)
+            self.process_and_enqueue_packet(packet, self.default_route)
         else:
             self.network_event_scheduler.log_packet_info(
                 packet, "dropped", self.node_id
             )
+
+    def process_and_enqueue_packet(self, packet, link):
+        source_mac = self.get_mac_address(link)
+        destination_mac = self.get_mac_address_from_ip(packet.header["destination_ip"])
+        packet.add_mac_header(source_mac, destination_mac)
+
+        self.network_event_scheduler.log_packet_info(packet, "forwarded", self.node_id)
+
+        link.enqueue_packet(packet, self)
 
     def cidr_to_network_address(self, cidr):
         network, mask_length = cidr.split("/")
@@ -269,6 +257,7 @@ class Router:
                 self.network_event_scheduler.log_packet_info(
                     packet, "received", self.node_id
                 )
+                packet.remove_mac_header()
                 destination_ip = packet.header["destination_ip"]
                 if "/" in destination_ip:
                     destination_ip, _ = destination_ip.split("/")

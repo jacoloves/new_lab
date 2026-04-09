@@ -2,9 +2,10 @@ from network.packet import BPDU
 
 
 class Switch:
-    def __init__(self, node_id, network_event_scheduler):
+    def __init__(self, node_id, network_event_scheduler, ip_address=None):
         self.network_event_scheduler = network_event_scheduler
         self.node_id = node_id
+        self.ip_address = ip_address
         self.links = []
         self.forwarding_table = {}
         self.link_states = {}
@@ -15,11 +16,14 @@ class Switch:
         label = f"Switch {node_id}"
         self.network_event_scheduler.add_node(node_id, label)
 
-    def add_link(self, link):
+    def add_link(self, link, ip_address=None):
         if link not in self.links:
             self.links.append(link)
             self.link_states[link] = "initial"
             self.send_bpdu()
+
+    def mark_ip_as_used(self, ip_address):
+        pass
 
     def update_link_state(self, link, state):
         self.link_states[link] = state
@@ -45,8 +49,8 @@ class Switch:
             for link in self.links:
                 self.link_states[link] = "forwarding"
 
-    def update_forwarding_table(self, destination_address, link):
-        self.forwarding_table[destination_address] = link
+    def update_forwarding_table(self, source_address, link):
+        self.forwarding_table[source_address] = link
 
     def receive_packet(self, packet, received_link):
         if isinstance(packet, BPDU):

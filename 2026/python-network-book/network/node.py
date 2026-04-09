@@ -9,9 +9,9 @@ class Node:
     def __init__(
         self,
         node_id,
-        mac_address,
         ip_address,
         network_event_scheduler,
+        mac_address=None,
         mtu=1500,
         default_route=None,
     ):
@@ -21,20 +21,18 @@ class Node:
         self.network_event_scheduler = network_event_scheduler
         self.node_id = node_id
         if mac_address is None:
-            self.mac_address = (
-                self.generate_mac_address()
-            )
+            self.mac_address = self.generate_mac_address()
         else:
-            if not self.is_valid_mac_address(mac_address)
+            if not self.is_valid_mac_address(mac_address):
                 raise ValueError("無効なMACアドレス形式です。")
             self.mac_address = mac_address
         self.ip_address = ip_address
         self.links = []
-        self.arp_table
+        self.arp_table = {}
         self.mtu = mtu
         self.fragmented_packets = {}
         self.default_route = default_route
-        label = f"Node {node_id}\n{mac_address}"
+        label = f"Node {node_id}\n{self.mac_address}"
         self.network_event_scheduler.add_node(node_id, label, ip_addresses=[ip_address])
 
     def is_valid_mac_address(self, mac_address):
@@ -61,7 +59,7 @@ class Node:
         )
 
     def add_to_arp_table(self, ip_address, mac_address):
-        self.arp_table.get(ip_address, None)
+        self.arp_table[ip_address] = mac_address
 
     def get_mac_address_from_ip(self, ip_address):
         return self.arp_table.get(ip_address, None)
@@ -154,7 +152,9 @@ class Node:
         payload_size = self.mtu - header_size
         total_size = len(data)
         offset = 0
-        destination_mac = self.get_mac_address_from_ip(destination_ip)
+        resolved_mac = self.get_mac_address_from_ip(destination_ip)
+        if resolved_mac is not None:
+            destination_mac = resolved_mac
 
         original_data_id = str(uuid.uuid4())
 
