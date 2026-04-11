@@ -3,7 +3,7 @@ import random
 from ipaddress import ip_network
 import uuid
 
-from .packet import BPDU, HelloPacket, LSAPacket
+from .packet import BPDU, ARPPacket, HelloPacket, LSAPacket
 
 
 class Router:
@@ -24,6 +24,7 @@ class Router:
         self.mac_addresses = {}
         self.routing_table = {}
         self.arp_table = {}
+        self.waiting_for_arp_reply = {}
         self.default_route = default_route
         self.neighbors = {}
         self.hello_interval = hello_interval
@@ -202,6 +203,20 @@ class Router:
     def get_link_state(self, link):
         return "active" if link.is_active else "inactive"
 
+    def on_arp_request_received(self, request_packet, received_link):
+        reply_packet = ARPPacket(
+            source_mac=self.get_mac_address(received_link),
+            destination_mac=request_packet.header["source_mac"],
+            source_ip=request_packet.header["destination_ip"],
+            destination_ip=request_packet.header["source_ip"],
+            operation="reply",
+            network_event_scheduler=self.network_event_scheduler,
+        )
+        self.network_event_scheduler.log_packet_info(
+            reply_packet, "ARP reply", self.node_id
+        )
+        received_link.enqueue_packet(reply_packet, self)
+
     def forward_packet(self, packet):
         destination_ip = packet.header["destination_ip"]
         next_hop, link = self.get_route(destination_ip)
@@ -220,12 +235,41 @@ class Router:
 
     def process_and_enqueue_packet(self, packet, link):
         source_mac = self.get_mac_address(link)
+        destination_ip = packet.header["destination_ip"]
         destination_mac = self.get_mac_address_from_ip(packet.header["destination_ip"])
-        packet.add_mac_header(source_mac, destination_mac)
 
-        self.network_event_scheduler.log_packet_info(packet, "forwarded", self.node_id)
+        if destination_mac is None:
+            self.send_arp_request(link, destination_ip)
+            if destination_ip not in self.waiting_for_arp_reply:
+                self.waiting_for_arp_reply[destination_ip] = []
+            self.waiting_for_arp_reply[destination_ip].append(packet)
+        else:
+            packet.add_mac_header(source_mac, destination_mac)
+            self.network_event_scheduler.log_packet_info(
+                packet, "forwarded", self.node_id
+            )
+            link.enqueue_packet(packet, self)
 
-        link.enqueue_packet(packet, self)
+    def send_arp_request(self, link, ip_address):
+        arp_request_packet = ARPPacket(
+            source_mac=self.get_mac_address(link),
+            destination_mac="FF:FF:FF:FF:FF:FF",
+            source_ip=self.get_ip_address(link),
+            destination_ip=ip_address,
+            operation="request",
+            network_event_scheduler=self.network_event_scheduler,
+        )
+        self.network_event_scheduler.log_packet_info(
+            arp_request_packet, "ARP request", self.node_id
+        )
+        link.enqueue_packet(arp_request_packet, self)
+
+    def on_arp_reply_received(self, source_ip, source_mac):
+        self.add_to_arp_table(source_ip, source_mac)
+        if source_ip in self.waiting_for_arp_reply:
+            for packet in self.waiting_for_arp_reply[source_ip]:
+                self.forward_packet(packet)
+            del self.waiting_for_arp_reply[source_ip]
 
     def cidr_to_network_address(self, cidr):
         network, mask_length = cidr.split("/")
@@ -233,6 +277,15 @@ class Router:
         return network, subnet_mask
 
     def receive_packet(self, packet, received_link):
+        if isinstance(packet, ARPPacket):
+            if packet.payload.get("operation") == "request":
+                self.on_arp_reply_received(packet, received_link)
+                return
+            elif packet.payload.get("operation") == "reply":
+                self.on_arp_reply_received(
+                    packet.header["source_ip"], packet.header["source_mac"]
+                )
+                return
         if isinstance(packet, HelloPacket):
             self.receive_hello_packet(packet, received_link)
             return

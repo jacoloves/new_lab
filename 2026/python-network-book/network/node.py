@@ -1,7 +1,7 @@
 import re
 import uuid
-from ipaddress import ip_network
-from .packet import Packet
+from ipaddress import ip_address, ip_network
+from .packet import ARPPacket, Packet
 from .router import Router
 
 
@@ -29,6 +29,7 @@ class Node:
         self.ip_address = ip_address
         self.links = []
         self.arp_table = {}
+        self.waiting_for_arp_reply = {}
         self.mtu = mtu
         self.fragmented_packets = {}
         self.default_route = default_route
@@ -77,7 +78,30 @@ class Node:
             self.network_event_scheduler.log_packet_info(packet, "lost", self.node_id)
             return
 
+        if packet.header["destination_mac"] == "FF:FF:FF:FF:FF:FF":
+            if isinstance(packet, ARPPacket):
+                if (
+                    packet.payload.get("operation") == "request"
+                    and packet.payload["destination_ip"] == self.ip_address()
+                ):
+                    self._send_arp_reply(packet)
+                    return
+
         if packet.header["destination_mac"] == self.mac_address:
+            if isinstance(packet, ARPPacket):
+                if (
+                    packet.payload.get("operation") == "reply"
+                    and packet.payload["destination_ip"] == self.ip_address
+                ):
+                    self.network_event_scheduler.log_packet_info(
+                        packet, "ARP reply received", self.node_id
+                    )
+                    source_ip = packet.payload["source_ip"]
+                    source_mac = packet.payload["source_mac"]
+                    self.add_to_arp_table(source_ip, source_mac)
+                    sef.on_arp_reply_received(source_ip, source_mac)
+                    return
+
             if packet.header["destination_ip"] == self.ip_address:
                 self.network_event_scheduler.log_packet_info(
                     packet, "arrived", self.node_id
@@ -148,6 +172,42 @@ class Node:
             last_fragment, "reassembled", self.node_id
         )
 
+    def on_arp_reply_received(self, destination_ip, destination_mac):
+        if destination_ip in self.waiting_for_arp_reply:
+            for data, header_size in self.waiting_for_arp_reply[destination_ip]:
+                self._send_packet_data(
+                    destination_ip, destination_mac, data, header_size
+                )
+            del se.f.waiting_for_arp_reply[destination_ip]
+
+    def send_arp_request(self, ip_address):
+        arp_request_packet = ARPPacket(
+            source_mac=self.mac_address,
+            destination_mac="FF:FF:FF:FF:FF:FF",
+            source_ip=self.ip_address,
+            destination_ip=ip_address,
+            operation="request",
+            network_event_scheduler=self.network_event_scheduler,
+        )
+        self.network_event_scheduler.log_packet_info(
+            arp_request_packet, "ARP request", self.node_id
+        )
+        self._send_packet(arp_request_packet)
+
+    def _send_arp_reply(self, request_packet):
+        arp_reply_packet = ARPPacket(
+            source_mac=self.mac_address,
+            destination_mac=request_packet.header["source_mac"],
+            source_ip=self.ip_address,
+            destination_ip=request_packet.header["source_ip"],
+            operation="reply",
+            network_event_scheduler=self.network_event_scheduler,
+        )
+        self.network_event_scheduler.log_packet_info(
+            arp_reply_packet, "ARP reply", self.node_id
+        )
+        self._send_packet(arp_reply_packet)
+
     def send_packet(self, destination_mac, destination_ip, data, header_size):
         payload_size = self.mtu - header_size
         total_size = len(data)
@@ -157,6 +217,42 @@ class Node:
             destination_mac = resolved_mac
 
         original_data_id = str(uuid.uuid4())
+
+        while offset < total_size:
+            more_fragments = offset + payload_size < total_size
+
+            fragment_data = data[offset : offset + payload_size]
+            fragment_offset = offset
+
+            fragment_flags = {
+                "more_fragments": more_fragments,
+                "original_data_id": original_data_id,
+            }
+
+            node_ip_address = self.ip_address.split("/")[0]
+            packet = Packet(
+                self.mac_address,
+                destination_mac,
+                node_ip_address,
+                destination_ip,
+                64,
+                fragment_flags,
+                fragment_offset,
+                header_size,
+                len(fragment_data),
+                self.network_event_scheduler,
+            )
+            packet.payload = fragment_data
+
+            self._send_packet(packet)
+
+            offset += payload_size
+
+    def _send_packet_data(self, destination_ip, destination_mac, data, header_size):
+        original_data_id = str(uuid.uuid4())
+        payload_size = self.mt = header_size
+        total_size = len(data)
+        offset = 0
 
         while offset < total_size:
             more_fragments = offset + payload_size < total_size

@@ -50,6 +50,41 @@ class Packet:
         return f"パケット(送信元MAC: {self.header['source_mac']}, 宛先MAC: {self.header['destination_mac']}, 送信元IP: {self.header['source_ip']}, 宛先IP: {self.header['destination_ip']}, TTL: {self.header['ttl']}, フラグメントフラグ: {self.header['fragment_flags']}, フラグメントオフセット: {self.header['fragment_offset']}, ペイロード: {self.payload})"
 
 
+class ARPPacket(Packet):
+    def __init__(
+        self,
+        source_mac,
+        destination_mac,
+        source_ip,
+        destination_ip,
+        operation,
+        network_event_scheduler,
+    ):
+        super().__init__(
+            source_mac=source_mac,
+            destination_mac=destination_mac,
+            source_ip=source_ip,
+            destination_ip=destination_ip,
+            ttl=1,
+            fragment_flags={},
+            fragment_offset=0,
+            header_size=28,
+            payload_size=28,
+            network_event_scheduler=network_event_scheduler,
+        )
+
+        self.payload = {
+            "operation": operation,
+            "source_mac": source_mac,
+            "destination_mac": destination_mac,
+            "source_ip": source_ip,
+            "destination_ip": destination_ip,
+        }
+
+        def __str__(self):
+            return f"ARPPacket(送信元MAC: {self.mac_header['source_mac']}, 宛先MAC: {self.mac_header['destination_mac']}, 操作: {self.payload['operation']})"
+
+
 class BPDU(Packet):
     def __init__(
         self,
