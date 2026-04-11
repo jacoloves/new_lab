@@ -16,29 +16,23 @@ node1 = Node(
 )
 node2 = Node(
     node_id="n2",
-    ip_address="192.168.2.1/24",
+    ip_address="192.168.1.2/24",
+    network_event_scheduler=network_event_scheduler,
+)
+node3 = Node(
+    node_id="n3",
+    ip_address="192.168.1.3/24",
+    network_event_scheduler=network_event_scheduler,
+)
+node4 = Node(
+    node_id="n4",
+    ip_address="192.168.1.4/24",
     network_event_scheduler=network_event_scheduler,
 )
 
 switch1 = Switch(
     node_id="s1",
     ip_address="192.168.1.11/24",
-    network_event_scheduler=network_event_scheduler,
-)
-switch2 = Switch(
-    node_id="s2",
-    ip_address="192.168.2.11/24",
-    network_event_scheduler=network_event_scheduler,
-)
-
-router1 = Router(
-    node_id="r1",
-    ip_address=["192.168.1.254/24", "10.1.1.1/24"],
-    network_event_scheduler=network_event_scheduler,
-)
-router2 = Router(
-    node_id="r2",
-    ip_address=["192.168.2.254/24", "10.1.1.2/24"],
     network_event_scheduler=network_event_scheduler,
 )
 
@@ -51,49 +45,62 @@ link1 = Link(
     network_event_scheduler=network_event_scheduler,
 )
 link2 = Link(
+    node2,
     switch1,
-    router1,
-    bandwidth=100000,
+    bandwidth=200000,
     delay=0.01,
     loss_rate=0.0,
     network_event_scheduler=network_event_scheduler,
 )
 link3 = Link(
-    router1,
-    router2,
+    node3,
+    switch1,
     bandwidth=200000,
     delay=0.01,
     loss_rate=0.0,
     network_event_scheduler=network_event_scheduler,
 )
 link4 = Link(
-    router2,
-    switch2,
-    bandwidth=100000,
-    delay=0.01,
-    loss_rate=0.0,
-    network_event_scheduler=network_event_scheduler,
-)
-link5 = Link(
-    switch2,
-    node2,
+    node4,
+    switch1,
     bandwidth=200000,
     delay=0.01,
     loss_rate=0.0,
     network_event_scheduler=network_event_scheduler,
 )
 
-node1.add_to_arp_table(node2.ip_address, router1.get_mac_address(link2))
-node2.add_to_arp_table(node1.ip_address, router2.get_mac_address(link4))
-router1.add_to_arp_table(node1.ip_address, node1.mac_address)
-router1.add_to_arp_table(node2.ip_address, router2.get_mac_address(link3))
-router2.add_to_arp_table(node1.ip_address, router1.get_mac_address(link3))
-router2.add_to_arp_table(node2.ip_address, node2.mac_address)
 
 network_event_scheduler.draw()
 
 node1.set_traffic(
-    destination_ip="192.168.2.1/24",
+    destination_ip="192.168.1.2/24",
+    bitrate=10000,
+    start_time=1.0,
+    duration=2.0,
+    header_size=50,
+    payload_size=10000,
+    burstiness=1.0,
+)
+node2.set_traffic(
+    destination_ip="192.168.1.3/24",
+    bitrate=10000,
+    start_time=1.0,
+    duration=2.0,
+    header_size=50,
+    payload_size=10000,
+    burstiness=1.0,
+)
+node3.set_traffic(
+    destination_ip="192.168.1.4/24",
+    bitrate=10000,
+    start_time=1.0,
+    duration=2.0,
+    header_size=50,
+    payload_size=10000,
+    burstiness=1.0,
+)
+node4.set_traffic(
+    destination_ip="192.168.1.1/24",
     bitrate=10000,
     start_time=1.0,
     duration=2.0,
@@ -104,13 +111,10 @@ node1.set_traffic(
 
 network_event_scheduler.run_until(5.0)
 
+node1.print_arp_table()
+node2.print_arp_table()
+node3.print_arp_table()
+node4.print_arp_table()
 switch1.print_forwarding_table()
-switch2.print_forwarding_table()
-
-router1.print_interfaces()
-router2.print_interfaces()
-
-router1.print_routing_table()
-router2.print_routing_table()
 
 network_event_scheduler.generate_summary(network_event_scheduler.packet_logs)
