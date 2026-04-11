@@ -78,7 +78,7 @@ class Node:
             return
 
         if packet.header["destination_mac"] == self.mac_address:
-            if packet.header["destination_ip"] == self.ip_address.split("/")[0]:
+            if packet.header["destination_ip"] == self.ip_address:
                 self.network_event_scheduler.log_packet_info(
                     packet, "arrived", self.node_id
                 )
