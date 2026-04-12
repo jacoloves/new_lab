@@ -85,6 +85,39 @@ class ARPPacket(Packet):
             return f"ARPPacket(送信元MAC: {self.mac_header['source_mac']}, 宛先MAC: {self.mac_header['destination_mac']}, 操作: {self.payload['operation']})"
 
 
+class DNSPacket(Packet):
+    def __init__(
+        self,
+        source_mac,
+        destination_mac,
+        source_ip,
+        destination_ip,
+        query_domain,
+        query_type,
+        network_event_scheduler,
+    ):
+        super().__init__(
+            source_mac=source_mac,
+            destination_mac=destination_mac,
+            source_ip=source_ip,
+            destination_ip=destination_ip,
+            ttl=64,
+            fragment_flags={},
+            fragment_offset=0,
+            header_size=0,
+            payload_size=0,
+            network_event_scheduler=network_event_scheduler,
+        )
+        self.query_domain = query_domain
+        self.query_type = query_type
+        self.dns_data = {}
+
+    def __str__(self):
+        source_mac = self.mac_header.get("source_mac", "不明")
+        destination_mac = self.mac_header.get("destination_mac", "不明")
+        return f"DNSPacket(送信元MAC: {source_mac}, 宛先MAC: {destination_mac}, 送信元IP: {self.ip_header['source_ip']}, 宛先IP: {self.ip_header['destination_ip']}, Query Domain: {self.query_domain}, Query Type: {self.query_type})"
+
+
 class BPDU(Packet):
     def __init__(
         self,

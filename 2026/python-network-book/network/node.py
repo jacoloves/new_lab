@@ -1,7 +1,7 @@
 import re
 import uuid
 from ipaddress import ip_address, ip_network
-from .packet import ARPPacket, Packet
+from .packet import ARPPacket, DNSPacket, Packet
 from .router import Router
 
 
@@ -12,6 +12,7 @@ class Node:
         ip_address,
         network_event_scheduler,
         mac_address=None,
+        dns_server="192.168.1.200/24",
         mtu=1500,
         default_route=None,
     ):
@@ -30,6 +31,9 @@ class Node:
         self.links = []
         self.arp_table = {}
         self.waiting_for_arp_reply = {}
+        self.dns_server_ip = dns_server
+        self.url_to_ip_mapping = {}
+        self.waiting_for_dns_reply = {}
         self.mtu = mtu
         self.fragmented_packets = {}
         self.default_route = default_route
@@ -73,6 +77,10 @@ class Node:
     def mark_ip_as_used(self, ip_address):
         pass
 
+    def add_dns_record(self, domain_name, ip_address):
+        self.url_to_ip_mapping[domain_name] = ip_address
+        print(f"{self.node_id} DNS record added: {domain_name} -> {ip_address}")
+
     def receive_packet(self, packet, received_link):
         if packet.arrival_time == -1:
             self.network_event_scheduler.log_packet_info(packet, "lost", self.node_id)
@@ -82,7 +90,7 @@ class Node:
             if isinstance(packet, ARPPacket):
                 if (
                     packet.payload.get("operation") == "request"
-                    and packet.payload["destination_ip"] == self.ip_address()
+                    and packet.payload["destination_ip"] == self.ip_address
                 ):
                     self._send_arp_reply(packet)
                     return
@@ -102,13 +110,27 @@ class Node:
                     sef.on_arp_reply_received(source_ip, source_mac)
                     return
 
+            if isinstance(packet, DNSPacket):
+                self.network_event_scheduler.log_packet_info(
+                    packet, "DNS packet received", self.node_id
+                )
+                if packet.query_domain and "resolved_ip" in packet.dns_data:
+                    self.on_dns_response_received(
+                        packet.query_domain, packet.dns_data["resolved_ip"]
+                    )
+                    return
+
             if packet.header["destination_ip"] == self.ip_address:
                 self.network_event_scheduler.log_packet_info(
                     packet, "arrived", self.node_id
                 )
                 packet.set_arrived(self.network_event_scheduler.current_time)
 
-                if packet.header["fragment_flags"]["more_fragments"]:
+                more_fragments = packet.header.get("generate_flags", {}).get(
+                    "more_fragments", False
+                )
+
+                if more_fragments:
                     self._store_fragment(packet)
                 else:
                     self._reassemble_and_process_packet(packet)
@@ -178,7 +200,7 @@ class Node:
                 self._send_packet_data(
                     destination_ip, destination_mac, data, header_size
                 )
-            del se.f.waiting_for_arp_reply[destination_ip]
+            del self.waiting_for_arp_reply[destination_ip]
 
     def send_arp_request(self, ip_address):
         arp_request_packet = ARPPacket(
@@ -208,49 +230,20 @@ class Node:
         )
         self._send_packet(arp_reply_packet)
 
-    def send_packet(self, destination_mac, destination_ip, data, header_size):
-        payload_size = self.mtu - header_size
-        total_size = len(data)
-        offset = 0
-        resolved_mac = self.get_mac_address_from_ip(destination_ip)
-        if resolved_mac is not None:
-            destination_mac = resolved_mac
+    def send_packet(self, destination_ip, data, header_size):
+        destination_mac = self.get_mac_address_from_ip(destination_ip)
 
-        original_data_id = str(uuid.uuid4())
-
-        while offset < total_size:
-            more_fragments = offset + payload_size < total_size
-
-            fragment_data = data[offset : offset + payload_size]
-            fragment_offset = offset
-
-            fragment_flags = {
-                "more_fragments": more_fragments,
-                "original_data_id": original_data_id,
-            }
-
-            node_ip_address = self.ip_address.split("/")[0]
-            packet = Packet(
-                self.mac_address,
-                destination_mac,
-                node_ip_address,
-                destination_ip,
-                64,
-                fragment_flags,
-                fragment_offset,
-                header_size,
-                len(fragment_data),
-                self.network_event_scheduler,
-            )
-            packet.payload = fragment_data
-
-            self._send_packet(packet)
-
-            offset += payload_size
+        if destination_mac is None:
+            self.send_arp_request(destination_ip)
+            if destination_ip not in self.waiting_for_arp_reply:
+                self.waiting_for_arp_reply[destination_ip] = []
+            self.waiting_for_arp_reply[destination_ip].append((data, header_size))
+        else:
+            self._send_packet_data(destination_ip, destination_mac, data, header_size)
 
     def _send_packet_data(self, destination_ip, destination_mac, data, header_size):
         original_data_id = str(uuid.uuid4())
-        payload_size = self.mt = header_size
+        payload_size = self.mtu - header_size
         total_size = len(data)
         offset = 0
 
@@ -291,14 +284,63 @@ class Node:
             for link in self.links:
                 link.enqueue_packet(packet, self)
 
-    def create_packet(self, destination_mac, destination_ip, header_size, payload_size):
-        # send_packetに委譲することでフラグメンテーションも適切に処理される
-        data = b"X" * payload_size
-        self.send_packet(destination_mac, destination_ip, data, header_size)
+    def create_packet(self, destination_ip, header_size, payload_size):
+        destination_mac = self.get_mac_address_from_ip(destination_ip)
+        node_ip_address = self.ip_address.split("/")[0]
+        packet = Packet(
+            source_mac=self.mac_address,
+            destination_mac=destination_mac,
+            source_ip=node_ip_address,
+            destination_ip=destination_ip,
+            ttl=64,
+            header_size=header_size,
+            payload_size=payload_size,
+            network_event_scheduler=self.network_event_scheduler,
+        )
+        self.network_event_scheduler.log_packet_info(
+            packet, "created", self.node_id
+        )
+        self._send_packet(packet)
+
+    def start_traffic(
+        self,
+        destination_url,
+        bitrate,
+        start_time,
+        duration,
+        header_size,
+        payload_size,
+        burstiness=1.0,
+    ):
+        def attempt_to_start_traffic():
+            destination_ip = self.resolve_destination_ip(destination_url)
+            if destination_ip is None:
+                self.send_dns_query_and_set_traffic(
+                    destination_url,
+                    bitrate,
+                    start_time,
+                    duration,
+                    header_size,
+                    payload_size,
+                    burstiness,
+                )
+            else:
+                self.set_traffic(
+                    destination_ip,
+                    bitrate,
+                    start_time,
+                    duration,
+                    header_size,
+                    payload_size,
+                    burstiness,
+                )
+
+        self.network_event_scheduler.schedule_event(
+            start_time, attempt_to_start_traffic
+        )
 
     def set_traffic(
         self,
-        # destination_mac,
         destination_ip,
         bitrate,
         start_time,
@@ -307,13 +349,12 @@ class Node:
         payload_size,
         burstiness=1.0,
     ):
-        destination_mac = self.get_mac_address_from_ip(destination_ip)
         end_time = start_time + duration
 
         def generate_packet():
             if self.network_event_scheduler.current_time < end_time:
                 data = b"X" * payload_size
-                self.send_packet(destination_mac, destination_ip, data, header_size)
+                self.send_packet(destination_ip, data, header_size)
 
                 packet_size = header_size + payload_size
                 interval = (packet_size * 8) / bitrate * burstiness
@@ -322,47 +363,71 @@ class Node:
                     generate_packet,
                 )
 
-        self.network_event_scheduler.schedule_event(start_time, generate_packet)
+        self.network_event_scheduler.schedule_event(
+            self.network_event_scheduler.current_time, generate_packet
+        )
 
-    def print_route(self, destination_ip):
-        paths = []
-        neighbors = []
-        if self.default_route is not None:
-            next_link = self.default_route
-            neighbor = (
-                next_link.node_x if self != next_link.node_x else next_link.node_y
-            )
-            neighbors.append(neighbor)
-        else:
-            for link in self.links:
-                neighbor = link.node_x if self != link.node_x else link.node_y
-                neighbors.append(neighbor)
+    def resolve_destination_ip(self, destination_url):
+        return self.url_to_ip_mapping.get(destination_url, None)
 
-        paths.append(self.node_id)
+    def send_dns_query_and_set_traffic(
+        self,
+        destination_url,
+        bitrate,
+        start_time,
+        duration,
+        header_size,
+        payload_size,
+        burstiness=1.0,
+    ):
+        if destination_url not in self.waiting_for_dns_reply:
+            self.waiting_for_dns_reply[destination_url] = []
+        self.waiting_for_dns_reply[destination_url].append(
+            (bitrate, start_time, duration, header_size, payload_size, burstiness)
+        )
+        self.send_dns_query(destination_url)
 
-        for neighbor in neighbors:
-            next_node = neighbor
-            while isinstance(next_node, Router):
-                paths.append(next_node.node_id)
-                next_hop_id, next_link = next_node.get_route(destination_ip)
-                next_hop = (
-                    next_link.node_x
-                    if next_node != next_link.node_x
-                    else next_link.node_y
+    def send_dns_query(self, destination_url):
+        dns_query_packet = DNSPacket(
+            source_mac=self.mac_address,
+            destination_mac="FF:FF:FF:FF:FF:FF",
+            source_ip=self.ip_address,
+            destination_ip=self.dns_server_ip,
+            query_domain=destination_url,
+            query_type="A",
+            network_event_scheduler=self.network_event_scheduler,
+        )
+        self.network_event_scheduler.log_packet_info(
+            dns_query_packet, "DNS query", self.node_id
+        )
+        self._send_packet(dns_query_packet)
+
+    def on_dns_response_received(self, query_domain, resolved_ip):
+        self.add_dns_record(query_domain, resolved_ip)
+        if query_domain in self.waiting_for_dns_reply:
+            for parameters in self.waiting_for_dns_reply[query_domain]:
+                bitrate, start_time, duration, header_size, payload_size, burstiness = (
+                    parameters
                 )
-                next_node = next_hop
-            else:
-                if next_node.ip_address == destination_ip:
-                    paths.append(next_node.node_id)
+                self.set_traffic(
+                    resolved_ip,
+                    bitrate,
+                    start_time,
+                    duration,
+                    header_size,
+                    payload_size,
+                    burstiness
+                )
+            del self.waiting_for_dns_reply[query_domain]
 
-        print("----------------------------------------")
-        print("Forwarding path from ", self.ip_address, " to ", destination_ip)
-        for index, node in enumerate(paths):
-            if index == len(paths) - 1:
-                print(node)
-            else:
-                print(node, end=" -> ")
-        print("----------------------------------------")
+    def print_url_to_ip_mapping(self):
+        print("URL to IP Mapping")
+        if not self.url_to_ip_mapping:
+            print("  No entries found.")
+            return
+
+        for url, ip_address in self.url_to_ip_mapping.items():
+            print(f"  {url}: {ip_address}")
 
     def __str__(self):
         connected_nodes = [

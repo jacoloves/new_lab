@@ -10,7 +10,7 @@ class Router:
     def __init__(
         self,
         node_id,
-        ip_address,
+        ip_addresses,
         network_event_scheduler,
         hello_interval=10,
         lsa_interval=10,
@@ -19,7 +19,7 @@ class Router:
         self.network_event_scheduler = network_event_scheduler
         self.node_id = node_id
         self.links = []
-        self.available_ips = {ip: False for ip in ip_address}
+        self.available_ips = {ip: False for ip in ip_addresses}
         self.interfaces = {}
         self.mac_addresses = {}
         self.routing_table = {}
@@ -34,7 +34,7 @@ class Router:
         self.is_topology_initialized = False
         self.topology_database = {}
         label = f"Router {node_id}"
-        self.network_event_scheduler.add_node(node_id, label, ip_addresses=ip_address)
+        self.network_event_scheduler.add_node(node_id, label, ip_addresses=ip_addresses)
         self.schedule_hello_packet()
         self.schedule_lsa()
 
