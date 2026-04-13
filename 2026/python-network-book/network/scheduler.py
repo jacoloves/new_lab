@@ -69,6 +69,24 @@ class NetworkEventScheduler:
                     node_shape="s",
                     node_size=250,
                 )
+            elif "DNSServer" in data["label"]:
+                nx.draw_networkx_nodes(
+                    self.graph,
+                    pos,
+                    nodelist=[node],
+                    node_color="forestgreen",
+                    node_shape="d",
+                    node_size=250,
+                )
+            elif "DHCPServer" in data["label"]:
+                nx.draw_networkx_nodes(
+                    self.graph,
+                    pos,
+                    nodelist=[node],
+                    node_color="limegreen",
+                    node_shape="d",
+                    node_size=250,
+                )
             else:
                 nx.draw_networkx_nodes(
                     self.graph,

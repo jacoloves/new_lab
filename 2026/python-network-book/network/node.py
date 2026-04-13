@@ -1,7 +1,9 @@
+import random
 import re
 import uuid
-from ipaddress import ip_address, ip_network
-from .packet import ARPPacket, DNSPacket, Packet
+from ipaddress import ip_interface, ip_network
+
+from .packet import ARPPacket, DNSPacket, Packet, DHCPPacket
 from .router import Router
 
 
@@ -12,13 +14,10 @@ class Node:
         ip_address,
         network_event_scheduler,
         mac_address=None,
-        dns_server="192.168.1.200/24",
+        dns_server=None,
         mtu=1500,
         default_route=None,
     ):
-        if not self.is_valid_cidr_notation(ip_address):
-            raise ValueError("無効なIPアドレス形式です。")
-
         self.network_event_scheduler = network_event_scheduler
         self.node_id = node_id
         if mac_address is None:
@@ -38,6 +37,8 @@ class Node:
         self.fragmented_packets = {}
         self.default_route = default_route
         label = f"Node {node_id}\n{self.mac_address}"
+
+        self.schedule_dhcp_packet()
         self.network_event_scheduler.add_node(node_id, label, ip_addresses=[ip_address])
 
     def is_valid_mac_address(self, mac_address):
@@ -48,6 +49,17 @@ class Node:
         try:
             ip_network(ip_address, strict=False)
             return True
+        except ValueError:
+            return False
+
+    def is_network_address(self, address):
+        try:
+            interface = ip_interface(address)
+            network = ip_network(address, strict=False)
+            return (
+                interface.ip == network.network_address
+                and interface.network.prefixlen == network.prefixlen
+            )
         except ValueError:
             return False
 
@@ -62,6 +74,43 @@ class Node:
                 for elements in range(0, 12, 2)
             ]
         )
+
+    def schedule_dhcp_packet(self):
+        if self.is_network_address(self.ip_address):
+            initial_delay = random.uniform(0.5, 0.6)
+            self.network_event_scheduler.schedule_event(
+                self.network_event_scheduler.current_time + initial_delay,
+                self.send_dhcp_discover,
+            )
+
+    def send_dhcp_discover(self):
+        dhcp_discover_packet = DHCPPacket(
+            source_mac=self.mac_address,
+            destination_mac="FF:FF:FF:FF:FF:FF",
+            source_ip="0.0.0.0/32",
+            destination_ip="255.255.255.255/32",
+            message_type="DISCOVER",
+            network_event_scheduler=self.network_event_scheduler,
+        )
+        self.network_event_scheduler.log_packet_info(
+            dhcp_discover_packet, "DHCP Discover sent", self.node_id
+        )
+        self._send_packet(dhcp_discover_packet)
+
+    def send_dhcp_request(self, requested_ip):
+        dhcp_request_packet = DHCPPacket(
+            source_mac=self.mac_address,
+            destination_mac="FF:FF:FF:FF:FF:FF",
+            source_ip="0.0.0.0/32",
+            destination_ip="255.255.255.255/32",
+            message_type="REQUEST",
+            network_event_scheduler=self.network_event_scheduler,
+        )
+        dhcp_request_packet.dhcp_data = {"requested_ip": requested_ip}
+        self.network_event_scheduler.log_packet_info(
+            dhcp_request_packet, "DHCP Request sent", self.node_id
+        )
+        self._send_packet(dhcp_request_packet)
 
     def add_to_arp_table(self, ip_address, mac_address):
         self.arp_table[ip_address] = mac_address
@@ -107,8 +156,35 @@ class Node:
                     source_ip = packet.payload["source_ip"]
                     source_mac = packet.payload["source_mac"]
                     self.add_to_arp_table(source_ip, source_mac)
-                    sef.on_arp_reply_received(source_ip, source_mac)
+                    self.on_arp_reply_received(source_ip, source_mac)
                     return
+
+            if isinstance(packet, DHCPPacket):
+                if packet.message_type == "OFFER":
+                    self.network_event_scheduler.log_packet_info(
+                        packet, "DHCP Offer received", self.node_id
+                    )
+                    offered_ip = packet.dhcp_data.get("offered_ip")
+                    if offered_ip:
+                        self.send_dhcp_request(offered_ip)
+                    return
+                elif packet.message_type == "ACK":
+                    self.network_event_scheduler.log_packet_info(
+                        packet, "DHCP ACK received", self.node_id
+                    )
+                    assigned_ip = packet.dhcp_data.get("assigned_ip")
+                    if assigned_ip:
+                        self.ip_address = assigned_ip
+                        print(
+                            f"Node {self.node_id} has been assigned the IP address {assigned_ip}."
+                        )
+                    dns_server_ip = packet.dhcp_data.get("dns_server_ip")
+                    if dns_server_ip:
+                        self.dns_server_ip = dns_server_ip
+                        print(
+                            f"Node {self.node_id} has been assigned the DNS server IP address {dns_server_ip}."
+                        )
+                        return
 
             if isinstance(packet, DNSPacket):
                 self.network_event_scheduler.log_packet_info(
@@ -297,9 +373,7 @@ class Node:
             payload_size=payload_size,
             network_event_scheduler=self.network_event_scheduler,
         )
-        self.network_event_scheduler.log_packet_info(
-            packet, "created", self.node_id
-        )
+        self.network_event_scheduler.log_packet_info(packet, "created", self.node_id)
         self._send_packet(packet)
 
     def start_traffic(
@@ -416,7 +490,7 @@ class Node:
                     duration,
                     header_size,
                     payload_size,
-                    burstiness
+                    burstiness,
                 )
             del self.waiting_for_dns_reply[query_domain]
 
