@@ -15,6 +15,9 @@ class Router:
         hello_interval=10,
         lsa_interval=10,
         default_route=None,
+        nat_enabled=False,
+        external_ip=None,
+        nat_table=None,
     ):
         self.network_event_scheduler = network_event_scheduler
         self.node_id = node_id
@@ -33,6 +36,11 @@ class Router:
         self.lsa_database = {}
         self.is_topology_initialized = False
         self.topology_database = {}
+
+        self.nat_enabled = nat_enabled
+        self.external_ip = external_ip
+        self.nat_table = nat_table or {}
+
         label = f"Router {node_id}"
         self.network_event_scheduler.add_node(node_id, label, ip_addresses=ip_addresses)
         self.schedule_hello_packet()
@@ -234,6 +242,15 @@ class Router:
             )
 
     def process_and_enqueue_packet(self, packet, link):
+        if self.nat_enabled:
+            source_internal = self.is_internal_ip(packet.header["source_ip"])
+            destination_internal = self.is_internal_ip(packet.header["destination_ip"])
+
+            if source_internal and not destination_internal:
+                self.apply_nat(packet, "outbound")
+            elif not source_internal and destination_internal:
+                self.apply_nat(packet, "inbound")
+
         source_mac = self.get_mac_address(link)
         destination_ip = packet.header["destination_ip"]
         destination_mac = self.get_mac_address_from_ip(packet.header["destination_ip"])
@@ -249,6 +266,48 @@ class Router:
                 packet, "forwarded", self.node_id
             )
             link.enqueue_packet(packet, self)
+
+    def is_internal_ip(self, ip_address):
+        ip_address = ip_address.split("/")[0]
+        internal_network = ipaddress.ip_network("192.168.0.0/16", strict=False)
+        return ipaddress.ip_address(ip_address) in internal_network
+
+    def apply_nat(self, packet, direction):
+        if self.network_event_scheduler.nat_verbose:
+            original_ip = (
+                packet.header["source_ip"]
+                if direction == "outbound"
+                else packet.header["destination_ip"]
+            )
+            new_ip = (
+                self.external_ip
+                if direction == "outbound"
+                else self.nat_table.get(packet.header["destination_ip"], "未変換")
+            )
+
+            log_message = f"NAT {direction}: {original_ip} -> {new_ip}"
+            self.network_event_scheduler.log_packet_info(
+                packet, log_message, self.node_id
+            )
+
+        if direction == "outbound":
+            original_src_ip = packet.header["source_ip"]
+            self.nat_table[original_src_ip] = self.external_ip
+            packet.header["source_ip"] = self.external_ip
+        elif direction == "inbound":
+            original_dst_ip = packet.header["destination_ip"]
+            internal_ip = self.nat_table.get(original_dst_ip)
+            if internal_ip:
+                packet.header["destination_ip"] = internal_ip
+
+    def print_nat_table(self):
+        if not self.nat_table:
+            print("NAT変換テーブルは空です。")
+            return
+
+        print("NAT変換テーブル:")
+        for internal_ip, external_ip in self.nat_table.items():
+            print(f"{internal_ip} -> {external_ip}")
 
     def send_arp_request(self, link, ip_address):
         arp_request_packet = ARPPacket(
@@ -589,23 +648,20 @@ class Router:
         return None
 
     def print_routing_table(self):
-        if self.network_event_scheduler.routing_verbose:
-            print(f"ルーティングテーブル（ルータ {self.node_id}）:")
-            for destination, route_info in self.routing_table.items():
-                next_hop, link = route_info
+        print(f"ルーティングテーブル（ルータ {self.node_id}）:")
+        for destination, route_info in self.routing_table.items():
+            next_hop, link = route_info
 
-                if next_hop is None:
-                    connection_status = "Directly connected"
-                    link_description = f", リンク: {link}" if link else ""
-                else:
-                    connection_status = f"Next hop: {next_hop}"
-                    link_description = (
-                        f", リンク: {link}" if link else ", リンク情報なし"
-                    )
+            if next_hop is None:
+                connection_status = "Directly connected"
+                link_description = f", リンク: {link}" if link else ""
+            else:
+                connection_status = f"Next hop: {next_hop}"
+                link_description = f", リンク: {link}" if link else ", リンク情報なし"
 
-                print(
-                    f"  宛先IPアドレス: {destination}, {connection_status}{link_description}"
-                )
+            print(
+                f"  宛先IPアドレス: {destination}, {connection_status}{link_description}"
+            )
 
     def ip_to_int(self, ip_address):
         octets = ip_address.split(".")

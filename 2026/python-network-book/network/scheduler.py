@@ -1,13 +1,18 @@
 import matplotlib.pyplot as plt
 import networkx as nx
-import numpy as np
 import heapq
+import numpy as np
 from collections import defaultdict
 
 
 class NetworkEventScheduler:
     def __init__(
-        self, log_enabled=False, verbose=False, stp_verbose=False, routing_verbose=False
+        self,
+        log_enabled=False,
+        verbose=False,
+        stp_verbose=False,
+        routing_verbose=False,
+        nat_verbose=False,
     ):
         self.current_time = 0
         self.events = []
@@ -17,6 +22,7 @@ class NetworkEventScheduler:
         self.verbose = verbose
         self.stp_verbose = stp_verbose
         self.routing_verbose = routing_verbose
+        self.nat_verbose = nat_verbose
         self.graph = nx.Graph()
 
     def add_node(self, node_id, label, ip_addresses=None):
@@ -32,14 +38,15 @@ class NetworkEventScheduler:
             return np.log10(bandwidth) + 1
 
         def get_edge_color(delay):
-            if delay <= 0.001:
+            if delay <= 0.001:  # <= 1ms
                 return "green"
-            elif delay <= 0.01:
+            elif delay <= 0.01:  # 1-10ms
                 return "yellow"
-            else:
+            else:  # >= 10ms
                 return "red"
 
         pos = nx.spring_layout(self.graph)
+
         edge_widths = [
             get_edge_width(self.graph[u][v]["bandwidth"]) for u, v in self.graph.edges()
         ]
@@ -51,16 +58,16 @@ class NetworkEventScheduler:
         )
 
         for node, data in self.graph.nodes(data=True):
-            if "Switch" in data["label"]:
+            if "Switch" in data["label"]:  # Switch
                 nx.draw_networkx_nodes(
                     self.graph,
                     pos,
                     nodelist=[node],
-                    node_color="red",
+                    node_color="lightcoral",
                     node_shape="s",
                     node_size=250,
                 )
-            elif "Router" in data["label"]:
+            elif "Router" in data["label"]:  # Router
                 nx.draw_networkx_nodes(
                     self.graph,
                     pos,
@@ -69,7 +76,7 @@ class NetworkEventScheduler:
                     node_shape="s",
                     node_size=250,
                 )
-            elif "DNSServer" in data["label"]:
+            elif "DNSServer" in data["label"]:  # DNS Server
                 nx.draw_networkx_nodes(
                     self.graph,
                     pos,
@@ -78,7 +85,7 @@ class NetworkEventScheduler:
                     node_shape="d",
                     node_size=250,
                 )
-            elif "DHCPServer" in data["label"]:
+            elif "DHCPServer" in data["label"]:  # DHCP Server
                 nx.draw_networkx_nodes(
                     self.graph,
                     pos,
@@ -87,12 +94,12 @@ class NetworkEventScheduler:
                     node_shape="d",
                     node_size=250,
                 )
-            else:
+            else:  # Node
                 nx.draw_networkx_nodes(
                     self.graph,
                     pos,
                     nodelist=[node],
-                    node_color="lightblue",
+                    node_color="royalblue",
                     node_shape="o",
                     node_size=250,
                 )
@@ -147,7 +154,7 @@ class NetworkEventScheduler:
             labels=nx.get_node_attributes(self.graph, "label"),
             font_size=8,
         )
-
+        # nx.draw_networkx_edge_labels(self.graph, pos, edge_labels=nx.get_edge_attributes(self.graph, 'label'), font_size=8)
         plt.show()
 
     def get_link_state(self, node1_id, node2_id, switches):
@@ -173,6 +180,7 @@ class NetworkEventScheduler:
         if self.log_enabled:
             if packet.id not in self.packet_logs:
                 self.packet_logs[packet.id] = {
+                    "packet_type": type(packet).__name__,  # パケットのクラス名を記録
                     "source_mac": packet.header["source_mac"],
                     "destination_mac": packet.header["destination_mac"],
                     "source_ip": packet.header["source_ip"],
@@ -191,8 +199,8 @@ class NetworkEventScheduler:
                 "event": event_type,
                 "node_id": node_id,
                 "packet_id": packet.id,
-                "src": packet.header["source_mac"],
-                "dst": packet.header["destination_mac"],
+                "src": packet.header["source_ip"],
+                "dst": packet.header["destination_ip"],
             }
             self.packet_logs[packet.id]["events"].append(event_info)
 
@@ -204,73 +212,81 @@ class NetworkEventScheduler:
     def print_packet_logs(self):
         for packet_id, log in self.packet_logs.items():
             print(
-                f"Packet ID: {packet_id} Src: {log['source_ip']} {log['creation_time']} -> Dst: {log['destination_ip']}{log['arrival_time']}"
+                f"Packet ID: {packet_id} Src: {log['source_ip']} {log['creation_time']} -> Dst: {log['destination_ip']} {log['arrival_time']}"
             )
-
             for event in log["events"]:
                 print(f"Time: {event['time']}, Event: {event['event']}")
 
     def generate_summary(self, packet_logs):
+        # パケットタイプとソース宛先ペアでの集計データを保持するための辞書
         summary_data = defaultdict(
-            lambda: {
-                "sent_packets": 0,
-                "sent_bytes": 0,
-                "received_packets": 0,
-                "received_bytes": 0,
-                "total_delay": 0,
-                "lost_packets": 0,
-                "min_creation_time": float("inf"),
-                "max_arrival_time": 0,
-            }
+            lambda: defaultdict(
+                lambda: {
+                    "sent_packets": 0,
+                    "sent_bytes": 0,
+                    "received_packets": 0,
+                    "received_bytes": 0,
+                    "total_delay": 0,
+                    "lost_packets": 0,
+                    "min_creation_time": float("inf"),
+                    "max_arrival_time": 0,
+                }
+            )
         )
 
+        # ログエントリを反復処理してデータを集計
         for packet_id, log in packet_logs.items():
-            src_dst_pair = (log["source_mac"], log["destination_mac"])
-            summary_data[src_dst_pair]["sent_packets"] += 1
-            summary_data[src_dst_pair]["sent_bytes"] += log["size"]
-            summary_data[src_dst_pair]["min_creation_time"] = min(
-                summary_data[src_dst_pair]["min_creation_time"], log["creation_time"]
+            packet_type = log["packet_type"]
+            src_dst_pair = (log["source_ip"], log["destination_ip"])
+            data = summary_data[packet_type][src_dst_pair]
+
+            data["sent_packets"] += 1
+            data["sent_bytes"] += log["size"]
+            data["min_creation_time"] = min(
+                data["min_creation_time"], log["creation_time"]
             )
 
             if "arrival_time" in log and log["arrival_time"] is not None:
-                summary_data[src_dst_pair]["received_packets"] += 1
-                summary_data[src_dst_pair]["received_bytes"] += log["size"]
-                summary_data[src_dst_pair]["total_delay"] += (
-                    log["arrival_time"] - log["creation_time"]
-                )
-                summary_data[src_dst_pair]["max_arrival_time"] = max(
-                    summary_data[src_dst_pair]["max_arrival_time"], log["arrival_time"]
+                data["received_packets"] += 1
+                data["received_bytes"] += log["size"]
+                data["total_delay"] += log["arrival_time"] - log["creation_time"]
+                data["max_arrival_time"] = max(
+                    data["max_arrival_time"], log["arrival_time"]
                 )
             else:
-                summary_data[src_dst_pair]["lost_packets"] += 1
+                data["lost_packets"] += 1
 
-        for src_dst, data in summary_data.items():
-            sent_packets = data["sent_packets"]
-            sent_bytes = data["sent_bytes"]
-            received_packets = data["received_packets"]
-            received_bytes = data["received_bytes"]
-            total_delay = data["total_delay"]
-            lost_packets = data["lost_packets"]
-            min_creation_time = data["min_creation_time"]
-            max_arrival_time = data["max_arrival_time"]
-
-            traffic_duration = max_arrival_time - min_creation_time
-            avg_throughput = (
-                (received_bytes * 8 / traffic_duration) if traffic_duration > 0 else 0
+        # 集計結果をパケットタイプごと、ソース宛先ペアごとに出力
+        for packet_type, src_dst_data in summary_data.items():
+            print(
+                f"Packet Type: {packet_type} ###########################################"
             )
-            avg_delay = total_delay / received_packets if received_packets > 0 else 0
-
-            print(f"Src-Dst Pair: {src_dst}")
-            print(f"Total Sent Packets: {sent_packets}")
-            print(f"Total Sent Bytes: {sent_bytes}")
-            print(f"Total Received Packets: {received_packets}")
-            print(f"Total Received Bytes: {received_bytes}")
-            print(f"Average Throughput(bps): {avg_throughput}")
-            print(f"Average Delay(s): {avg_delay}")
-            print(f"Lost Packets: {lost_packets}\n")
+            for src_dst, data in src_dst_data.items():
+                print(f"  Src-Dst Pair: {src_dst}")
+                print(f"    Total Sent Packets: {data['sent_packets']}")
+                print(f"    Total Sent Bytes: {data['sent_bytes']}")
+                print(f"    Total Received Packets: {data['received_packets']}")
+                print(f"    Total Received Bytes: {data['received_bytes']}")
+                avg_throughput = (
+                    (
+                        data["received_bytes"]
+                        * 8
+                        / (data["max_arrival_time"] - data["min_creation_time"])
+                    )
+                    if (data["max_arrival_time"] - data["min_creation_time"]) > 0
+                    else 0
+                )
+                avg_delay = (
+                    data["total_delay"] / data["received_packets"]
+                    if data["received_packets"] > 0
+                    else 0
+                )
+                print(f"    Average Throughput (bps): {avg_throughput}")
+                print(f"    Average Delay (s): {avg_delay}")
+                print(f"    Lost Packets: {data['lost_packets']}\n")
 
     def generate_throughput_graph(self, packet_logs):
-        time_slot = 1.0
+        time_slot = 1.0  # 時間スロットを1秒に固定
 
         max_time = max(
             log["arrival_time"]
@@ -278,12 +294,12 @@ class NetworkEventScheduler:
             if log["arrival_time"] is not None
         )
         min_time = min(log["creation_time"] for log in packet_logs.values())
-        num_slots = int((max_time - min_time) / time_slot) + 1
+        num_slots = int((max_time - min_time) / time_slot) + 1  # スロットの総数を計算
 
         throughput_data = defaultdict(list)
         for packet_id, log in packet_logs.items():
             if log["arrival_time"] is not None:
-                src_dst_pair = (log["source_mac"], log["destination_mac"])
+                src_dst_pair = (log["source_ip"], log["destination_ip"])
                 slot_index = int((log["arrival_time"] - min_time) / time_slot)
                 throughput_data[src_dst_pair].append((slot_index, log["size"]))
 
@@ -309,8 +325,8 @@ class NetworkEventScheduler:
                 marker="o",
             )
 
-        plt.xlabel("Time(s)")
-        plt.ylabel("Throughput(bps)")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Throughput (bps)")
         plt.title("Throughput over time")
         plt.xlim(0, max_time)
         plt.legend()
@@ -320,7 +336,7 @@ class NetworkEventScheduler:
         delay_data = defaultdict(list)
         for packet_id, log in packet_logs.items():
             if log["arrival_time"] is not None:
-                src_dst_pair = (log["source_mac"], log["destination_mac"])
+                src_dst_pair = (log["source_ip"], log["destination_ip"])
                 delay = log["arrival_time"] - log["creation_time"]
                 delay_data[src_dst_pair].append(delay)
 
@@ -339,7 +355,7 @@ class NetworkEventScheduler:
                 color="royalblue",
                 label=f"{src_dst[0]} -> {src_dst[1]}",
             )
-            ax.set_xlabel("Delay(s)")
+            ax.set_xlabel("Delay (s)")
             ax.set_ylabel("Frequency")
             ax.set_title(f"Delay histogram for {src_dst[0]} -> {src_dst[1]}")
             ax.set_xlim(0, max_delay)
