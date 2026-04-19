@@ -3,8 +3,9 @@ import re
 import uuid
 from ipaddress import ip_interface, ip_network
 
-from .packet import ARPPacket, DNSPacket, Packet, DHCPPacket
+from .packet import ARPPacket, DNSPacket, Packet, DHCPPacket, TCPPacket, UDPPacket
 from .router import Router
+from network import packet
 
 
 class Node:
@@ -18,16 +19,20 @@ class Node:
         mtu=1500,
         default_route=None,
     ):
-        self.network_event_scheduler = network_event_scheduler
         self.node_id = node_id
+        self.network_event_scheduler = network_event_scheduler
+        self.ip_address = ip_address
         if mac_address is None:
             self.mac_address = self.generate_mac_address()
         else:
             if not self.is_valid_mac_address(mac_address):
                 raise ValueError("無効なMACアドレス形式です。")
             self.mac_address = mac_address
-        self.ip_address = ip_address
         self.links = []
+        self.used_ports = set()
+        self.port_mapping = {}
+        self.tcp_connections = {}
+        self.pending_tcp_data = {}
         self.arp_table = {}
         self.waiting_for_arp_reply = {}
         self.dns_server_ip = dns_server
@@ -74,6 +79,26 @@ class Node:
                 for elements in range(0, 12, 2)
             ]
         )
+
+    def select_available_port(self):
+        for port in range(1024, 49152):
+            if port not in self.used_ports:
+                self.used_ports.add(port)
+                return port
+        raise Exception("No available ports")
+
+    def select_random_port(self):
+        return random.randint(1024, 49151)
+
+    def assign_destination_port(self, source_port):
+        destination_port = self.select_random_port()
+        self.port_mapping[source_port] = destination_port
+        return destination_port
+
+    def get_destination_port(self, source_port):
+        if source_port not in self.port_mapping:
+            return self.assign_destination_port(source_port)
+        return self.port_mapping[source_port]
 
     def schedule_dhcp_packet(self):
         if self.is_network_address(self.ip_address):
@@ -130,90 +155,225 @@ class Node:
         self.url_to_ip_mapping[domain_name] = ip_address
         print(f"{self.node_id} DNS record added: {domain_name} -> {ip_address}")
 
-    def receive_packet(self, packet, received_link):
-        if packet.arrival_time == -1:
-            self.network_event_scheduler.log_packet_info(packet, "lost", self.node_id)
-            return
-
+    def process_ARP_packet(self, packet):
         if packet.header["destination_mac"] == "FF:FF:FF:FF:FF:FF":
-            if isinstance(packet, ARPPacket):
-                if (
-                    packet.payload.get("operation") == "request"
-                    and packet.payload["destination_ip"] == self.ip_address
-                ):
-                    self._send_arp_reply(packet)
-                    return
+            self.network_event_scheduler.log_packet_info(
+                packet, "arrived", self.node_id
+            )
+            packet.set_arrived(self.network_event_scheduler.current_time)
+            if (
+                packet.payload.get("operation") == "request"
+                and packet.payload["destination_ip"] == self.ip_address
+            ):
+                self._send_arp_reply(packet)
+                return
 
         if packet.header["destination_mac"] == self.mac_address:
-            if isinstance(packet, ARPPacket):
-                if (
-                    packet.payload.get("operation") == "reply"
-                    and packet.payload["destination_ip"] == self.ip_address
-                ):
-                    self.network_event_scheduler.log_packet_info(
-                        packet, "ARP reply received", self.node_id
-                    )
-                    source_ip = packet.payload["source_ip"]
-                    source_mac = packet.payload["source_mac"]
-                    self.add_to_arp_table(source_ip, source_mac)
-                    self.on_arp_reply_received(source_ip, source_mac)
-                    return
-
-            if isinstance(packet, DHCPPacket):
-                if packet.message_type == "OFFER":
-                    self.network_event_scheduler.log_packet_info(
-                        packet, "DHCP Offer received", self.node_id
-                    )
-                    offered_ip = packet.dhcp_data.get("offered_ip")
-                    if offered_ip:
-                        self.send_dhcp_request(offered_ip)
-                    return
-                elif packet.message_type == "ACK":
-                    self.network_event_scheduler.log_packet_info(
-                        packet, "DHCP ACK received", self.node_id
-                    )
-                    assigned_ip = packet.dhcp_data.get("assigned_ip")
-                    if assigned_ip:
-                        self.ip_address = assigned_ip
-                        print(
-                            f"Node {self.node_id} has been assigned the IP address {assigned_ip}."
-                        )
-                    dns_server_ip = packet.dhcp_data.get("dns_server_ip")
-                    if dns_server_ip:
-                        self.dns_server_ip = dns_server_ip
-                        print(
-                            f"Node {self.node_id} has been assigned the DNS server IP address {dns_server_ip}."
-                        )
-                        return
-
-            if isinstance(packet, DNSPacket):
+            if (
+                packet.payload.get("operation") == "reply"
+                and packet.payload["destination_ip"] == self.ip_address
+            ):
                 self.network_event_scheduler.log_packet_info(
-                    packet, "DNS packet received", self.node_id
+                    packet, "ARP reply received", self.node_id
                 )
-                if packet.query_domain and "resolved_ip" in packet.dns_data:
-                    self.on_dns_response_received(
-                        packet.query_domain, packet.dns_data["resolved_ip"]
-                    )
-                    return
+                source_ip = packet.payload["source_ip"]
+                source_mac = packet.payload["source_mac"]
+                self.add_to_arp_table(source_ip, source_mac)
+                self.on_arp_reply_received(source_ip, source_mac)
+                return
 
+    def process_DHCP_packet(self, packet):
+        if packet.header["destination_mac"] == self.mac_address:
+            self.network_event_scheduler.log_packet_info(
+                packet, "arrived", self.node_id
+            )
+            packet.set_arrived(self.network_event_scheduler.current_time)
+            if packet.message_type == "OFFER":
+                self.network_event_scheduler.log_packet_info(
+                    packet, "DHCP Offer received", self.node_id
+                )
+                offered_ip = packet.dhcp_data.get("offered_ip")
+                if offered_ip:
+                    self.send_dhcp_request(offered_ip)
+                return
+            elif packet.message_type == "ACK":
+                self.network_event_scheduler.log_packet_info(
+                    packet, "DHCP ACK received", self.node_id
+                )
+                assigned_ip = packet.dhcp_data.get("assigned_ip")
+                if assigned_ip:
+                    self.ip_address = assigned_ip
+                    print(
+                        f"Node {self.node_id} has been assigned the IP address {assigned_ip}."
+                    )
+                dns_server_ip = packet.dhcp_data.get("dns_server_ip")
+                if dns_server_ip:
+                    self.dns_server_ip = dns_server_ip
+                    print(
+                        f"Node {self.node_id} has been assigned the DNS server IP address {dns_server_ip}."
+                    )
+                return
+
+    def process_DNS_packet(self, packet):
+        if packet.header["destination_mac"] == self.mac_address:
+            self.network_event_scheduler.log_packet_info(
+                packet, "arrived", self.node_id
+            )
+            packet.set_arrived(self.network_event_scheduler.current_time)
+            self.network_event_scheduler.log_packet_info(
+                packet, "DNS packet received", self.node_id
+            )
+            if packet.query_domain and "resolved_ip" in packet.dns_data:
+                self.on_dns_response_received(
+                    packet.query_domain, packet.dns_data["resolved_ip"]
+                )
+                return
+
+    def process_UDP_packet(self, packet):
+        if packet.header["destination_mac"] == self.mac_address:
             if packet.header["destination_ip"] == self.ip_address:
-                self.network_event_scheduler.log_packet_info(
-                    packet, "arrived", self.node_id
-                )
-                packet.set_arrived(self.network_event_scheduler.current_time)
-
-                more_fragments = packet.header.get("generate_flags", {}).get(
-                    "more_fragments", False
-                )
-
-                if more_fragments:
-                    self._store_fragment(packet)
-                else:
-                    self._reassemble_and_process_packet(packet)
+                self.process_data_packet(packet)
             else:
                 self.network_event_scheduler.log_packet_info(
                     packet, "dropped", self.node_id
                 )
+
+    def process_TCP_packet(self, packet):
+        if packet.header["destination_mac"] == self.mac_address:
+            if packet.header["destination_ip"] == self.ip_address:
+                flags = packet.header.get("flags", "")
+            if "SYN" in flags and "ACK" not in flags:
+                self.send_TCP_SYN_ACK(packet)
+            elif "SYN" in flags and "ACK" in flags:
+                self.send_TCP_ACK(packet, final_ack=True)
+            elif "ACK" in flags:
+                self.establish_TCP_connection(packet)
+            elif "FIN" in flags:
+                self.terminate_TCP_connection(packet)
+            elif "PSH" in flags or "PSH-ACK" in flags:
+                self.process_data_packet(packet)
+            else:
+                self.process_data_packet(packet)
+        else:
+            self.network_event_scheduler.log_packet_info(
+                packet, "dropped", self.node_id
+            )
+
+    def send_TCP_SYN_ACK(self, packet):
+        self.network_event_scheduler.log_packet_info(packet, "arrived", self.node_id)
+        packet.set_arrived(self.network_event_scheduler.current_time)
+        if self.network_event_scheduler.tcp_verbose:
+            print(
+                f"Sending SYN-ACK to {packet.header['source_ip']}:{packet.header['source_port']}"
+            )
+        syn_ack_packet_flags = "SYN,ACK"
+        self._send_tcp_packet(
+            destination_ip=packet.header["source_ip"],
+            destination_mac=packet.header["source_mac"],
+            data="",
+            flags=syn_ack_packet_flags,
+            source_port=packet.header["destination_port"],
+            destination_port=packet.header["source_port"],
+        )
+
+    def send_TCP_ACK(self, packet, final_ack=False):
+        self.network_event_scheduler.log_packet_info(packet, "arrived", self.node_id)
+        packet.set_arrived(self.network_event_scheduler.current_time)
+        if self.network_event_scheduler.tcp_verbose:
+            print(
+                f"Sending ACK to {packet.header['source_ip']}:{packet.header['source_port']}, Final ACK:{final_ack}"
+            )
+        ack_packet_flags = "ACK"
+        self._send_tcp_packet(
+            destination_ip=packet.header["source_ip"],
+            destination_mac=packet.header["source_mac"],
+            data="",
+            flags=ack_packet_flags,
+            source_port=packet.header["destination_port"],
+            destination_port=packet.header["source_port"],
+        )
+        if final_ack:
+            self.establish_TCP_connection(packet)
+
+    def establish_TCP_connection(self, packet):
+        connection_key = (packet.header["source_ip"], packet.header["source_port"])
+
+        if self.is_tcp_connection_established(*connection_key):
+            return
+
+        self.network_event_scheduler.log_packet_info(packet, "arrived", self.node_id)
+        packet.set_arrived(self.network_event_scheduler.current_time)
+        if self.network_event_scheduler.tcp_verbose:
+            print(
+                f"Establishing TCP connection with {packet.header['source_ip']}:{packet.header['source_port']}"
+            )
+
+        self.update_tcp_connection_state(*connection_key, "ESTABLISHED")
+
+        if connection_key in self.pending_tcp_data:
+            pending_data = self.pending_tcp_data.pop(connection_key)
+            data_to_send = pending_data["data"]
+            kwargs_to_use = pending_data["kwargs"]
+            self._send_tcp_packet(
+                packet.header["source_ip"],
+                packet.header["source_mac"],
+                data_to_send,
+                **kwargs_to_use,
+            )
+
+    def terminate_TCP_connection(self, packet):
+        self.network_event_scheduler.log_packet_info(packet, "arrived", self.node_id)
+        packet.set_arrived(self.network_event_scheduler.current_time)
+        if self.network_event_scheduler.tcp_verbose:
+            print(
+                f"Terminating TCP connection with {packet.header['source_ip']}:{packet.header['source_port']}"
+            )
+        connection_key = (packet.header["source_ip"], packet.header["source_port"])
+        if connection_key in self.tcp_connections:
+            del self.tcp_connections[connection_key]
+
+    def print_tcp_connections(self):
+        if not self.tcp_connections:
+            print("現在、アクティブなTCPコネクションはありません。")
+            return
+
+        print("アクティブなTCPコネクションの状態:")
+        for connection, state in self.tcp_connections.items():
+            destination_ip, destination_port = connection
+            print(
+                f"宛先IP: {destination_ip}, 宛先ポート: {destination_port}, 状態: {state['state']}"
+            )
+
+    def receive_packet(self, packet, received_link):
+        if packet.arrival_time == -1:
+            self.network_event_scheduler.log_packet_info(packet, "lost", self.node_id)
+        elif isinstance(packet, ARPPacket):
+            self.process_ARP_packet(packet)
+        elif isinstance(packet, DHCPPacket):
+            self.process_DHCP_packet(packet)
+        elif isinstance(packet, DNSPacket):
+            self.process_DNS_packet(packet)
+        elif isinstance(packet, UDPPacket):
+            self.process_UDP_packet(packet)
+        elif isinstance(packet, TCPPacket):
+            self.process_TCP_packet(packet)
+        else:
+            self.network_event_scheduler.log_packet_info(
+                packet, "dropped", self.node_id
+            )
+
+    def process_data_packet(self, packet):
+        self.network_event_scheduler.log_packet_info(packet, "arrived", self.node_id)
+        packet.set_arrived(self.network_event_scheduler.current_time)
+
+        more_fragments = packet.header.get("fragment_flags", {}).get(
+            "more_fragments", False
+        )
+
+        if more_fragments:
+            self._store_fragment(packet)
+        else:
+            self._reassemble_and_process_packet(packet)
 
     def _store_fragment(self, fragment):
         original_data_id = fragment.header["fragment_flags"]["original_data_id"]
@@ -243,11 +403,6 @@ class Node:
             return
 
         fragments = self.fragmented_packets.pop(original_data_id)
-
-        # last_fragmentをfragmentsに追加してから再組み立てする
-        last_offset = last_fragment.header["fragment_offset"]
-        fragments[last_offset] = last_fragment
-
         sorted_offsets = sorted(fragments.keys())
 
         reassembled_data = b"".join(
@@ -272,10 +427,9 @@ class Node:
 
     def on_arp_reply_received(self, destination_ip, destination_mac):
         if destination_ip in self.waiting_for_arp_reply:
-            for data, header_size in self.waiting_for_arp_reply[destination_ip]:
-                self._send_packet_data(
-                    destination_ip, destination_mac, data, header_size
-                )
+            for packet_info in self.waiting_for_arp_reply[destination_ip]:
+                data, protocol, kwargs = packet_info
+                self.send_packet(destination_ip, data, protocol=protocol, **kwargs)
             del self.waiting_for_arp_reply[destination_ip]
 
     def send_arp_request(self, ip_address):
@@ -306,50 +460,150 @@ class Node:
         )
         self._send_packet(arp_reply_packet)
 
-    def send_packet(self, destination_ip, data, header_size):
+    def send_packet(self, destination_ip, data, protocol="UDP", **kwargs):
         destination_mac = self.get_mac_address_from_ip(destination_ip)
 
         if destination_mac is None:
             self.send_arp_request(destination_ip)
             if destination_ip not in self.waiting_for_arp_reply:
                 self.waiting_for_arp_reply[destination_ip] = []
-            self.waiting_for_arp_reply[destination_ip].append((data, header_size))
+            self.waiting_for_arp_reply[destination_ip].append((data, protocol, kwargs))
         else:
-            self._send_packet_data(destination_ip, destination_mac, data, header_size)
+            if protocol == "UDP":
+                self._send_packet_data(destination_ip, destination_mac, data, **kwargs)
+            elif protocol == "TCP":
+                if not self.is_tcp_connection_established(
+                    destination_ip, kwargs.get("destination_port")
+                ):
+                    connection_key = (destination_ip, kwargs.get("destination_port"))
+                    self.pending_tcp_data[connection_key] = {
+                        "data": data,
+                        "kwargs": kwargs,
+                    }
+                    self.initiate_tcp_handshake(
+                        destination_ip, destination_mac, **kwargs
+                    )
+                else:
+                    self._send_tcp_packet(
+                        destination_ip, destination_mac, data, **kwargs
+                    )
 
-    def _send_packet_data(self, destination_ip, destination_mac, data, header_size):
+    def is_tcp_connection_established(self, destination_ip, destination_port):
+        key = (destination_ip, destination_port)
+        return self.tcp_connections.get(key, {}).get("state") == "ESTABLISHED"
+
+    def update_tcp_connection_state(self, destination_ip, destination_port, new_state):
+        key = (destination_ip, destination_port)
+        self.tcp_connections[key] = {"state": new_state}
+        if self.network_event_scheduler.tcp_verbose:
+            print(
+                f"TCP connection state updated to {new_state} for {destination_ip}:{destination_port}"
+            )
+
+    def initiate_tcp_handshake(self, destination_ip, destination_mac, **kwargs):
+        if not self.is_tcp_connection_established(
+            destination_ip, kwargs.get("destination_port")
+        ):
+            if self.network_event_scheduler.tcp_verbose:
+                print(
+                    f"Initiating TCP handshake: Sending SYN to {destination_ip}:{kwargs.get('destination_port')} from port {kwargs.get('source_port')}"
+                )
+
+                control_packet_kwargs = kwargs.copy()
+                control_packet_kwargs.update(
+                    {
+                        "flags": "SYN",
+                        "payload_size": 0,
+                    }
+                )
+                self.update_tcp_connection_state(
+                    destination_ip, kwargs.get("destination_port"), "SYN_SENT"
+                )
+                self._send_tcp_packet(
+                    destination_ip, destination_mac, b"", **control_packet_kwargs
+                )
+
+    def _send_udp_packet(self, destination_ip, destination_mac, data, **kwargs):
+        print(
+            f"Sending UDP packet to {destination_ip}, {len(data)} bytes., kwargs={kwargs}"
+        )
+        udp_header_size = 8
+        ip_header_size = 20
+        header_size = udp_header_size + ip_header_size
+        self._send_ip_packet_data(
+            destination_ip, destination_mac, data, header_size, protocol="UDP", **kwargs
+        )
+
+    def _send_tcp_packet(self, destination_ip, destination_mac, data, **kwargs):
+        tcp_header_size = 20
+        ip_header_size = 20
+        header_size = tcp_header_size + ip_header_size
+
+        self._send_ip_packet_data(
+            destination_ip, destination_mac, data, header_size, protocol="TCP", **kwargs
+        )
+
+    def _send_ip_packet_data(
+        self, destination_ip, destination_mac, data, header_size, protocol, **kwargs
+    ):
         original_data_id = str(uuid.uuid4())
-        payload_size = self.mtu - header_size
-        total_size = len(data)
+        total_size = len(data) if data else 1
         offset = 0
 
         while offset < total_size:
-            more_fragments = offset + payload_size < total_size
+            max_payload_size = self.mtu - header_size
+            payload_size = min(max_payload_size, total_size - offset) if data else 0
 
-            fragment_data = data[offset : offset + payload_size]
+            fragment_data = data[offset : offset + payload_size] if data else b""
             fragment_offset = offset
 
+            more_fragments = offset + payload_size < total_size
             fragment_flags = {
                 "more_fragments": more_fragments,
                 "original_data_id": original_data_id,
             }
 
-            node_ip_address = self.ip_address.split("/")[0]
-            packet = Packet(
-                self.mac_address,
-                destination_mac,
-                node_ip_address,
-                destination_ip,
-                64,
-                fragment_flags,
-                fragment_offset,
-                header_size,
-                len(fragment_data),
-                self.network_event_scheduler,
-            )
-            packet.payload = fragment_data
+            if protocol == "UDP":
+                packet = UDPPacket(
+                    source_mac=self.mac_address,
+                    destination_mac=destination_mac,
+                    source_ip=self.ip_address,
+                    destination_ip=destination_ip,
+                    ttl=64,
+                    data=fragment_data,
+                    network_event_scheduler=self.network_event_scheduler,
+                    fragment_flags=fragment_flags,
+                    fragment_offset=fragment_offset,
+                    header_size=header_size,
+                    payload_size=payload_size,
+                    source_port=kwargs.get("source_port"),
+                    destination_port=kwargs.get("destination_port"),
+                )
+            elif protocol == "TCP":
+                packet = TCPPacket(
+                    source_mac=self.mac_address,
+                    destination_mac=destination_mac,
+                    source_ip=self.ip_address,
+                    destination_ip=destination_ip,
+                    ttl=64,
+                    data=fragment_data,
+                    network_event_scheduler=self.network_event_scheduler,
+                    fragment_flags=fragment_flags,
+                    fragment_offset=fragment_offset,
+                    header_size=header_size,
+                    payload_size=payload_size,
+                    source_port=kwargs.get("source_port"),
+                    destination_port=kwargs.get("destination_port"),
+                    sequence_number=kwargs.get("sequence_number", ""),
+                    acknowledgment_number=kwargs.get("acknowledgment_number", ""),
+                    flags=kwargs.get("flags", ""),
+                )
 
+            packet.payload = fragment_data
             self._send_packet(packet)
+
+            if not data:
+                break
 
             offset += payload_size
 
@@ -360,23 +614,7 @@ class Node:
             for link in self.links:
                 link.enqueue_packet(packet, self)
 
-    def create_packet(self, destination_ip, header_size, payload_size):
-        destination_mac = self.get_mac_address_from_ip(destination_ip)
-        node_ip_address = self.ip_address.split("/")[0]
-        packet = Packet(
-            source_mac=self.mac_address,
-            destination_mac=destination_mac,
-            source_ip=node_ip_address,
-            destination_ip=destination_ip,
-            ttl=64,
-            header_size=header_size,
-            payload_size=payload_size,
-            network_event_scheduler=self.network_event_scheduler,
-        )
-        self.network_event_scheduler.log_packet_info(packet, "created", self.node_id)
-        self._send_packet(packet)
-
-    def start_traffic(
+    def start_udp_traffic(
         self,
         destination_url,
         bitrate,
@@ -385,6 +623,7 @@ class Node:
         header_size,
         payload_size,
         burstiness=1.0,
+        protocol="UDP",
     ):
         def attempt_to_start_traffic():
             destination_ip = self.resolve_destination_ip(destination_url)
@@ -397,9 +636,87 @@ class Node:
                     header_size,
                     payload_size,
                     burstiness,
+                    protocol,
                 )
             else:
-                self.set_traffic(
+                self.set_udp_traffic(
+                    destination_ip,
+                    bitrate,
+                    start_time,
+                    duration,
+                    header_size,
+                    payload_size,
+                    burstiness,
+                    protocol,
+                )
+
+        self.network_event_scheduler.schedule_event(
+            start_time, attempt_to_start_traffic
+        )
+
+    def set_udp_traffic(
+        self,
+        destination_ip,
+        bitrate,
+        start_time,
+        duration,
+        header_size,
+        payload_size,
+        burstiness=1.0,
+        protocol="UDP",
+    ):
+        end_time = start_time + duration
+        source_port = self.select_random_port()
+        destination_port = self.select_random_port()
+
+        def generate_packet():
+            if self.network_event_scheduler.current_time < end_time:
+                data = b"X" * payload_size
+                self.send_packet(
+                    destination_ip,
+                    data,
+                    protocol,
+                    source_port=source_port,
+                    destination_port=destination_port,
+                )
+
+                packet_size = header_size + payload_size
+                interval = (payload_size * 8) / bitrate * burstiness
+                self.network_event_scheduler.schedule_event(
+                    self.network_event_scheduler.current_time + interval,
+                    generate_packet,
+                )
+
+        self.network_event_scheduler.schedule_event(
+            self.network_event_scheduler.current_time, generate_packet
+        )
+
+    def start_tcp_traffic(
+        self,
+        destination_url,
+        bitrate,
+        start_time,
+        duration,
+        header_size,
+        payload_size,
+        burstiness=1.0,
+        protocol="TCP",
+    ):
+        def attempt_to_start_traffic():
+            destination_ip = self.resolve_destination_ip(destination_url)
+            if destination_ip is None:
+                self.send_dns_query_and_set_traffic(
+                    destination_url,
+                    bitrate,
+                    start_time,
+                    duration,
+                    header_size,
+                    payload_size,
+                    burstiness,
+                    protocol="TCP",
+                )
+            else:
+                self.set_tcp_traffic(
                     destination_ip,
                     bitrate,
                     start_time,
@@ -413,7 +730,7 @@ class Node:
             start_time, attempt_to_start_traffic
         )
 
-    def set_traffic(
+    def set_tcp_traffic(
         self,
         destination_ip,
         bitrate,
@@ -422,13 +739,22 @@ class Node:
         header_size,
         payload_size,
         burstiness=1.0,
+        protocol="TCP",
     ):
         end_time = start_time + duration
+        source_port = self.select_random_port()
+        destination_port = self.select_random_port()
 
         def generate_packet():
             if self.network_event_scheduler.current_time < end_time:
                 data = b"X" * payload_size
-                self.send_packet(destination_ip, data, header_size)
+                self.send_packet(
+                    destination_ip,
+                    data,
+                    protocol,
+                    source_port=source_port,
+                    destination_port=destination_port,
+                )
 
                 packet_size = header_size + payload_size
                 interval = (packet_size * 8) / bitrate * burstiness
@@ -437,9 +763,7 @@ class Node:
                     generate_packet,
                 )
 
-        self.network_event_scheduler.schedule_event(
-            self.network_event_scheduler.current_time, generate_packet
-        )
+        self.network_event_scheduler.schedule_event(start_time + 1, generate_packet)
 
     def resolve_destination_ip(self, destination_url):
         return self.url_to_ip_mapping.get(destination_url, None)
@@ -453,11 +777,20 @@ class Node:
         header_size,
         payload_size,
         burstiness=1.0,
+        protocol="UDP",
     ):
         if destination_url not in self.waiting_for_dns_reply:
             self.waiting_for_dns_reply[destination_url] = []
         self.waiting_for_dns_reply[destination_url].append(
-            (bitrate, start_time, duration, header_size, payload_size, burstiness)
+            (
+                bitrate,
+                start_time,
+                duration,
+                header_size,
+                payload_size,
+                burstiness,
+                protocol,
+            )
         )
         self.send_dns_query(destination_url)
 
@@ -480,18 +813,35 @@ class Node:
         self.add_dns_record(query_domain, resolved_ip)
         if query_domain in self.waiting_for_dns_reply:
             for parameters in self.waiting_for_dns_reply[query_domain]:
-                bitrate, start_time, duration, header_size, payload_size, burstiness = (
-                    parameters
-                )
-                self.set_traffic(
-                    resolved_ip,
+                (
                     bitrate,
                     start_time,
                     duration,
                     header_size,
                     payload_size,
                     burstiness,
-                )
+                    protocol,
+                ) = parameters
+                if protocol == "UDP":
+                    self.set_udp_traffic(
+                        resolved_ip,
+                        bitrate,
+                        start_time,
+                        duration,
+                        header_size,
+                        payload_size,
+                        burstiness,
+                    )
+                elif protocol == "TCP":
+                    self.set_tcp_traffic(
+                        resolved_ip,
+                        bitrate,
+                        start_time,
+                        duration,
+                        header_size,
+                        payload_size,
+                        burstiness,
+                    )
             del self.waiting_for_dns_reply[query_domain]
 
     def print_url_to_ip_mapping(self):

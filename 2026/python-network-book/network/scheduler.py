@@ -13,6 +13,7 @@ class NetworkEventScheduler:
         stp_verbose=False,
         routing_verbose=False,
         nat_verbose=False,
+        tcp_verbose=False,
     ):
         self.current_time = 0
         self.events = []
@@ -23,6 +24,7 @@ class NetworkEventScheduler:
         self.stp_verbose = stp_verbose
         self.routing_verbose = routing_verbose
         self.nat_verbose = nat_verbose
+        self.tcp_verbose = tcp_verbose
         self.graph = nx.Graph()
 
     def add_node(self, node_id, label, ip_addresses=None):

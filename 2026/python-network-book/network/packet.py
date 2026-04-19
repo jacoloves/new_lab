@@ -25,7 +25,7 @@ class Packet:
             "fragment_flags": fragment_flags,
             "fragment_offset": fragment_offset,
         }
-        self.payload = b"X" * payload_size
+
         self.size = header_size + payload_size
         self.creation_time = self.network_event_scheduler.current_time
         self.arrival_time = None
@@ -47,8 +47,47 @@ class Packet:
         return False
 
     def __str__(self):
+        source_mac = self.mac_header.get("source_mac", "不明")
+        destination_mac= self.mac_header.get("destination_mac", "不明")
         return f"パケット(送信元MAC: {self.header['source_mac']}, 宛先MAC: {self.header['destination_mac']}, 送信元IP: {self.header['source_ip']}, 宛先IP: {self.header['destination_ip']}, TTL: {self.header['ttl']}, フラグメントフラグ: {self.header['fragment_flags']}, フラグメントオフセット: {self.header['fragment_offset']}, ペイロード: {self.payload})"
 
+class TCPPacket(Packet):
+    def __init__(
+        self,
+        source_port,
+        destination_port,
+        sequence_number,
+        acknowledgment_number,
+        flags,
+        data=b"",
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.tcp_header = {
+            "source_port": source_port,
+            "destination_port": destination_port,
+            "sequence_number": sequence_number,
+            "acknowledgment_number": acknowledgment_number,
+            "flags": flags
+        }
+        self.payload = data
+
+    @property
+    def header(self):
+        return {**self.mac_header, **self.ip_header, **self.tcp_header}
+
+class UDPPacket(Packet):
+    def __init__(self, source_port, destination_port, data=b"", **kwargs):
+        super().__init__(**kwargs)
+        self.udp_header = {
+            "source_port": source_port,
+            "destination_port": destination_port,
+        }
+        self.payload = data
+
+    @property
+    def header(self):
+        return {**self.mac_header, **self.ip_header, **self.udp_header}
 
 class ARPPacket(Packet):
     def __init__(
