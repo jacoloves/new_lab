@@ -1,4 +1,4 @@
-from network.packet import BPDU
+from .packet import BPDU
 
 
 class Switch:
@@ -12,7 +12,7 @@ class Switch:
         self.root_id = node_id
         self.root_path_cost = 0
         self.is_root = True
-        self.timeout_delay = 0.5
+        self.timeout_delay = 0.5  # BPDU再送信のタイムアウト時間
         label = f"Switch {node_id}"
         self.network_event_scheduler.add_node(node_id, label)
 
@@ -39,12 +39,14 @@ class Switch:
                 network_event_scheduler=self.network_event_scheduler,
             )
             link.enqueue_packet(bpdu, self)
+        # BPDU送信後にタイムアウト処理をスケジュール
         self.network_event_scheduler.schedule_event(
             self.network_event_scheduler.current_time + self.timeout_delay,
             self.timeout_and_activate_links,
         )
 
     def timeout_and_activate_links(self):
+        # 全リンクがまだ初期状態ならアクティブ化
         if all(state == "initial" for state in self.link_states.values()):
             for link in self.links:
                 self.link_states[link] = "forwarding"
@@ -56,20 +58,23 @@ class Switch:
         if isinstance(packet, BPDU):
             self.network_event_scheduler.log_packet_info(
                 packet, "BPDU received", self.node_id
-            )
+            )  # パケット受信をログに記録
             self.process_bpdu(packet, received_link)
         else:
             if packet.arrival_time == -1:
                 self.network_event_scheduler.log_packet_info(
                     packet, "lost", self.node_id
-                )
+                )  # パケットが失われた場合の処理
                 return
             self.network_event_scheduler.log_packet_info(
                 packet, "received", self.node_id
-            )
+            )  # パケット受信をログに記録
 
             source_address = packet.header["source_mac"]
-            self.update_forwarding_table(source_address, received_link)
+            self.update_forwarding_table(
+                source_address, received_link
+            )  # フォワーディングテーブルを更新
+
             self.forward_packet(packet, received_link)
 
     def forward_packet(self, packet, received_link):
@@ -90,9 +95,11 @@ class Switch:
                     link.enqueue_packet(packet, self)
 
     def process_bpdu(self, bpdu, received_link):
+        # ルートIDの更新とルートパスコストの計算
         new_root_id = bpdu.payload["root_id"]
-        new_path_cost = bpdu.payload["path_cost"] + 1
+        new_path_cost = bpdu.payload["path_cost"] + 1  # 受信リンクを通るコストを加算
 
+        # ルート情報が変更されたかどうかを確認
         root_info_changed = (
             new_root_id != self.root_id or new_path_cost < self.root_path_cost
         )
@@ -100,26 +107,31 @@ class Switch:
         if self.network_event_scheduler.stp_verbose:
             current_time = self.network_event_scheduler.current_time
             print(
-                f"Time: {current_time} - {self.node_id} processing BPDU: new_root_id={new_root_id},current_root_id={self.root_id}, new_path_cost={new_path_cost}, current_root_path_cost={self.root_path_cost}"
+                f"Time: {current_time} - {self.node_id} processing BPDU: new_root_id={new_root_id}, current_root_id={self.root_id}, new_path_cost={new_path_cost}, current_root_path_cost={self.root_path_cost}"
             )
 
         if new_root_id < self.root_id or (
             new_root_id == self.root_id and new_path_cost < self.root_path_cost
         ):
+            # ルート情報の更新
             self.root_id = new_root_id
             self.root_path_cost = new_path_cost
             self.is_root = False
 
+        # リンク状態の更新（例：フォワーディング/ブロッキング）
         self.update_link_states(received_link, new_path_cost)
 
+        # ルート情報が変更された場合のみBPDUを再送信
         if root_info_changed:
             self.send_bpdu()
 
-    def update_link_states(self, receive_link, received_bpdu_path_cost):
+    def update_link_states(self, received_link, received_bpdu_path_cost):
         if self.is_root:
+            # ルートブリッジの場合、全てのポートをフォワーディング状態に設定
             for link in self.links:
                 self.link_states[link] = "forwarding"
         else:
+            # 非ルートブリッジの場合、最小コストのリンクを選択してフォワーディングに設定
             best_path_cost = float("inf")
             best_link = None
             best_link_id = None

@@ -18,6 +18,7 @@ class NetworkEventScheduler:
         self.current_time = 0
         self.events = []
         self.event_id = 0
+        self.cancelled_events = set()  # キャンセルされたイベントIDを保持するセット
         self.packet_logs = {}
         self.log_enabled = log_enabled
         self.verbose = verbose
@@ -177,6 +178,11 @@ class NetworkEventScheduler:
         event = (event_time, self.event_id, callback, args)
         heapq.heappush(self.events, event)
         self.event_id += 1
+        return self.event_id - 1  # スケジュールしたイベントのIDを返す
+
+    def cancel_event(self, event_id):
+        # 指定されたイベントIDをキャンセルされたイベントのセットに追加
+        self.cancelled_events.add(event_id)
 
     def log_packet_info(self, packet, event_type, node_id=None):
         if self.log_enabled:
@@ -248,7 +254,11 @@ class NetworkEventScheduler:
                 data["min_creation_time"], log["creation_time"]
             )
 
-            if "arrival_time" in log and log["arrival_time"] is not None:
+            if (
+                "arrival_time" in log
+                and log["arrival_time"] is not None
+                and log["arrival_time"] > 0
+            ):
                 data["received_packets"] += 1
                 data["received_bytes"] += log["size"]
                 data["total_delay"] += log["arrival_time"] - log["creation_time"]
@@ -368,12 +378,22 @@ class NetworkEventScheduler:
 
     def run(self):
         while self.events:
-            event_time, _, callback, args = heapq.heappop(self.events)
+            event_time, event_id, callback, args = heapq.heappop(self.events)
+            if event_id in self.cancelled_events:
+                self.cancelled_events.remove(
+                    event_id
+                )  # キャンセルされたイベントをセットから削除
+                continue  # キャンセルされたイベントはスキップ
             self.current_time = event_time
             callback(*args)
 
     def run_until(self, end_time):
         while self.events and self.events[0][0] <= end_time:
             event_time, event_id, callback, args = heapq.heappop(self.events)
+            if event_id in self.cancelled_events:
+                self.cancelled_events.remove(
+                    event_id
+                )  # キャンセルされたイベントをセットから削除
+                continue  # キャンセルされたイベントはスキップ
             self.current_time = event_time
             callback(*args)

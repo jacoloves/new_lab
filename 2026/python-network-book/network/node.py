@@ -2,6 +2,7 @@ import random
 import re
 import uuid
 from ipaddress import ip_interface, ip_network
+from random import randint
 
 from .packet import ARPPacket, DNSPacket, Packet, DHCPPacket, TCPPacket, UDPPacket
 from .router import Router
@@ -32,6 +33,11 @@ class Node:
         self.used_ports = set()
         self.port_mapping = {}
         self.tcp_connections = {}
+        self.window_size = 4
+        self.max_attempts = 3
+        self.windows = {}
+        self.timeout_interval = 2
+        self.scheduled_timeouts = {}
         self.pending_tcp_data = {}
         self.arp_table = {}
         self.waiting_for_arp_reply = {}
@@ -232,6 +238,11 @@ class Node:
     def process_UDP_packet(self, packet):
         if packet.header["destination_mac"] == self.mac_address:
             if packet.header["destination_ip"] == self.ip_address:
+                self.network_event_scheduler.log_packet_info(
+                    packet, "arrived", self.node_id
+                )
+                packet.set_arrived(self.network_event_scheduler.current_time)
+
                 self.process_data_packet(packet)
             else:
                 self.network_event_scheduler.log_packet_info(
@@ -241,89 +252,220 @@ class Node:
     def process_TCP_packet(self, packet):
         if packet.header["destination_mac"] == self.mac_address:
             if packet.header["destination_ip"] == self.ip_address:
+                self.network_event_scheduler.log_packet_info(
+                    packet, "arrived", self.node_id
+                )
+                packet.set_arrived(self.network_event_scheduler.current_time)
+
                 flags = packet.header.get("flags", "")
-            if "SYN" in flags and "ACK" not in flags:
-                self.send_TCP_SYN_ACK(packet)
-            elif "SYN" in flags and "ACK" in flags:
-                self.send_TCP_ACK(packet, final_ack=True)
-            elif "ACK" in flags:
-                self.establish_TCP_connection(packet)
-            elif "FIN" in flags:
-                self.terminate_TCP_connection(packet)
-            elif "PSH" in flags or "PSH-ACK" in flags:
-                self.process_data_packet(packet)
+
+                if "SYN" in flags:
+                    if "ACK" in flags:
+                        self.establish_TCP_connection(packet)
+                        self.send_TCP_ACK(packet)
+                        self.send_tcp_data_packet(packet)
+                    else:
+                        self.send_TCP_SYN_ACK(packet)
+                    return
+
+                if "ACK" in flags:
+                    self.handle_acknowledgement(packet)
+                    if self.check_duplication_threshold(
+                        packet
+                    ):
+                        self.check_and_retransmit_packets(packet)
+                    else:
+                        self.send_tcp_data_packet(packet)
+
+                if "PSH" in flags:
+                    self.update_ACK_number(packet)
+                    self.send_TCP_ACK(packet)
+                    self.process_data_packet(packet)
+
+                if "FIN" in flags:
+                    self.terminate_TCP_connection(packet)
+
             else:
-                self.process_data_packet(packet)
+                self.network_event_scheduler.log_packet_info(
+                    packet, "dropped", self.node_id
+                )
+
+    def initialize_connection_info(
+        self,
+        connection_key=None,
+        state="CLOSED",
+        sequence_number=0,
+        acknowledgment_number=0,
+        data=b"",
+    ):
+        self.tcp_connections[connection_key] = {
+            "state": state,
+            "sequence_number": sequence_number,
+            "acknowledgment_number": acknowledgment_number,
+            "data": data,
+            "last_ack_number": None,
+            "duplicate_ack_count": 0,
+        }
+
+    def handle_acknowledgement(self, packet):
+        connection_key = (packet.header["source_ip"], packet.header["source_port"])
+        ack_number = packet.header["acknowledgment_number"]
+
+        if connection_key not in self.tcp_connections:
+            return
+
+        if connection_key not in self.windows:
+            self.windows[
+                connection_key
+            ] = {}
+
+        if self.tcp_connections[connection_key]["last_ack_number"] == ack_number:
+            self.tcp_connections[connection_key]["duplicate_ack_count"] += 1
         else:
-            self.network_event_scheduler.log_packet_info(
-                packet, "dropped", self.node_id
+            self.tcp_connections[connection_key]["duplicate_ack_count"] = 1
+            self.tcp_connections[connection_key]["last_ack_number"] = ack_number
+
+        for seq, packet_info in list(self.windows[connection_key].items()):
+            if packet_info["expected_ack_number"] <= ack_number:
+                if self.network_event_scheduler.tcp_verbose:
+                    print(
+                        f"Removing packet with sequence number {seq} from window for connection {connection_key} due to receiving ACK {ack_number}. Expected ACK was {packet_info['expected_ack_number']}."
+                    )
+                self.cancel_timeout(connection_key, seq)
+                del self.windows[connection_key][seq]
+
+                if self.tcp_connections[connection_key]["data"]:
+                    self.send_tcp_data_packet(packet)
+
+    def check_duplication_threshold(self, packet):
+        connection_key = (packet.header["source_ip"], packet.header["source_port"])
+        if connection_key in self.tcp_connections:
+            if self.tcp_connections[connection_key]["duplicate_ack_count"] >= 3:
+                if self.network_event_scheduler.tcp_verbose:
+                    last_ack_number = self.tcp_connections[connection_key].get(
+                        "last_ack_number"
+                    )
+                    print(
+                        f"Duplicate ACK threshold reached for connection {connection_key} with ACK number {last_ack_number}."
+                    )
+                return True
+            else:
+                return False
+        return False
+
+    def check_and_retransmit_packets(self, packet):
+        connection_key = (packet.header["source_ip"], packet.header["source_port"])
+        sequence_number = self.find_retransmit_sequence_number(connection_key)
+        if sequence_number is not None:
+            self.retransmit_packet(connection_key, sequence_number)
+        else:
+            print(f"No packets to retransmit for connection {connection_key}")
+
+    def update_ACK_number(self, packet):
+        connection_key = (packet.header["source_ip"], packet.header["source_port"])
+        if connection_key not in self.tcp_connections:
+            return
+
+        seq_start = packet.header["sequence_number"]
+        payload_length = len(packet.payload)
+
+        current_ack_number = self.tcp_connections[connection_key][
+            "acknowledgment_number"
+        ]
+
+        received_set = self.tcp_connections[connection_key].setdefault(
+            "received_sequence_number", set()
+        )
+        for seq in range(seq_start, seq_start + payload_length):
+            received_set.add(seq)
+
+        next_expected_seq = current_ack_number
+        while next_expected_seq in received_set:
+            next_expected_seq += 1
+
+        if next_expected_seq != current_ack_number:
+            self.tcp_connections[connection_key]["acknowledgment_number"] = (
+                next_expected_seq
             )
+            if self.network_event_scheduler.tcp_verbose:
+                print(
+                    f"Updated ACK number to {next_expected_seq} for connection {connection_key}."
+                )
+        else:
+            pass
 
     def send_TCP_SYN_ACK(self, packet):
-        self.network_event_scheduler.log_packet_info(packet, "arrived", self.node_id)
-        packet.set_arrived(self.network_event_scheduler.current_time)
-        if self.network_event_scheduler.tcp_verbose:
-            print(
-                f"Sending SYN-ACK to {packet.header['source_ip']}:{packet.header['source_port']}"
+        connection_key = (packet.header["source_ip"], packet.header["source_port"])
+
+        sequence_number = randint(1, 10000)
+        acknowledgment_number = packet.header["sequence_number"] + 1
+
+        if connection_key not in self.tcp_connections:
+            self.initialize_connection_info(
+                connection_key=connection_key,
+                state="SYN_RECEIVED",
+                sequence_number=sequence_number,
+                acknowledgment_number=acknowledgment_number,
+                data=b"",
             )
-        syn_ack_packet_flags = "SYN,ACK"
+
+        control_packet_kwargs = {
+            "flags": "SYN,ACK",
+            "sequence_number": self.tcp_connections[connection_key]["sequence_number"],
+            "acknowledgment_number": self.tcp_connections[connection_key][
+                "acknowledgment_number"
+            ],
+            "source_port": packet.header["destination_port"],
+            "destination_port": packet.header["source_port"],
+        }
         self._send_tcp_packet(
             destination_ip=packet.header["source_ip"],
             destination_mac=packet.header["source_mac"],
-            data="",
-            flags=syn_ack_packet_flags,
-            source_port=packet.header["destination_port"],
-            destination_port=packet.header["source_port"],
+            data=b"",
+            **control_packet_kwargs,
         )
 
-    def send_TCP_ACK(self, packet, final_ack=False):
-        self.network_event_scheduler.log_packet_info(packet, "arrived", self.node_id)
-        packet.set_arrived(self.network_event_scheduler.current_time)
-        if self.network_event_scheduler.tcp_verbose:
-            print(
-                f"Sending ACK to {packet.header['source_ip']}:{packet.header['source_port']}, Final ACK:{final_ack}"
-            )
-        ack_packet_flags = "ACK"
-        self._send_tcp_packet(
-            destination_ip=packet.header["source_ip"],
-            destination_mac=packet.header["source_mac"],
-            data="",
-            flags=ack_packet_flags,
-            source_port=packet.header["destination_port"],
-            destination_port=packet.header["source_port"],
-        )
-        if final_ack:
-            self.establish_TCP_connection(packet)
+        self.update_tcp_connection_state(connection_key, "ESTABLISHED")
+        self.tcp_connections[connection_key]["sequence_number"] += 1
 
     def establish_TCP_connection(self, packet):
         connection_key = (packet.header["source_ip"], packet.header["source_port"])
+        if connection_key in self.tcp_connections:
+            if self.tcp_connections[connection_key]["state"] == "ESTABLISHED":
+                return
+            else:
+                self.update_tcp_connection_state(connection_key, "ESTABLISHED")
+                self.tcp_connections[connection_key]["acknowledgment_number"] = (
+                    packet.header["sequence_number"] + 1
+                )
 
-        if self.is_tcp_connection_established(*connection_key):
-            return
+    def send_TCP_ACK(self, packet, final_ack=False):
+        connection_key = (packet.header["source_ip"], packet.header["source_port"])
 
-        self.network_event_scheduler.log_packet_info(packet, "arrived", self.node_id)
-        packet.set_arrived(self.network_event_scheduler.current_time)
-        if self.network_event_scheduler.tcp_verbose:
-            print(
-                f"Establishing TCP connection with {packet.header['source_ip']}:{packet.header['source_port']}"
-            )
-
-        self.update_tcp_connection_state(*connection_key, "ESTABLISHED")
-
-        if connection_key in self.pending_tcp_data:
-            pending_data = self.pending_tcp_data.pop(connection_key)
-            data_to_send = pending_data["data"]
-            kwargs_to_use = pending_data["kwargs"]
+        if connection_key in self.tcp_connections:
+            control_packet_kwargs = {
+                "flags": "ACK",
+                "sequence_number": self.tcp_connections[connection_key][
+                    "sequence_number"
+                ],
+                "acknowledgment_number": self.tcp_connections[connection_key][
+                    "acknowledgment_number"
+                ],
+                "source_port": packet.header["destination_port"],
+                "destination_port": packet.header["source_port"],
+            }
             self._send_tcp_packet(
-                packet.header["source_ip"],
-                packet.header["source_mac"],
-                data_to_send,
-                **kwargs_to_use,
+                destination_ip=packet.header["source_ip"],
+                destination_mac=packet.header["source_mac"],
+                data=b"",
+                **control_packet_kwargs,
             )
+        else:
+            if self.network_event_scheduler.tcp_verbose:
+                print("Error: Connection key not found in tcp_connections.")
+
 
     def terminate_TCP_connection(self, packet):
-        self.network_event_scheduler.log_packet_info(packet, "arrived", self.node_id)
-        packet.set_arrived(self.network_event_scheduler.current_time)
         if self.network_event_scheduler.tcp_verbose:
             print(
                 f"Terminating TCP connection with {packet.header['source_ip']}:{packet.header['source_port']}"
@@ -331,6 +473,9 @@ class Node:
         connection_key = (packet.header["source_ip"], packet.header["source_port"])
         if connection_key in self.tcp_connections:
             del self.tcp_connections[connection_key]
+            print(f"TCP connection terminated with {connection_key}")
+        else:
+            print("Error: Connection key not found.")
 
     def print_tcp_connections(self):
         if not self.tcp_connections:
@@ -363,9 +508,6 @@ class Node:
             )
 
     def process_data_packet(self, packet):
-        self.network_event_scheduler.log_packet_info(packet, "arrived", self.node_id)
-        packet.set_arrived(self.network_event_scheduler.current_time)
-
         more_fragments = packet.header.get("fragment_flags", {}).get(
             "more_fragments", False
         )
@@ -373,7 +515,13 @@ class Node:
         if more_fragments:
             self._store_fragment(packet)
         else:
-            self._reassemble_and_process_packet(packet)
+            original_data_id = packet.header.get("fragment_flags", {}).get(
+                "original_data_id"
+            )
+            if original_data_id and original_data_id in self.fragmented_packets:
+                self._reassemble_and_process_packet(packet)
+            else:
+                self.direct_process_packet(packet)
 
     def _store_fragment(self, fragment):
         original_data_id = fragment.header["fragment_flags"]["original_data_id"]
@@ -424,6 +572,9 @@ class Node:
         self.network_event_scheduler.log_packet_info(
             last_fragment, "reassembled", self.node_id
         )
+
+    def direct_process_packet(self, packet):
+        pass
 
     def on_arp_reply_received(self, destination_ip, destination_mac):
         if destination_ip in self.waiting_for_arp_reply:
@@ -492,13 +643,15 @@ class Node:
         key = (destination_ip, destination_port)
         return self.tcp_connections.get(key, {}).get("state") == "ESTABLISHED"
 
-    def update_tcp_connection_state(self, destination_ip, destination_port, new_state):
-        key = (destination_ip, destination_port)
-        self.tcp_connections[key] = {"state": new_state}
-        if self.network_event_scheduler.tcp_verbose:
-            print(
-                f"TCP connection state updated to {new_state} for {destination_ip}:{destination_port}"
+    def update_tcp_connection_state(self, connection_key, new_state):
+        if connection_key not in self.tcp_connections:
+            self.initialize_connection_info(
+                connection_key=connection_key, state=new_state
             )
+        else:
+            self.tcp_connections[connection_key]["state"] = new_state
+        if self.network_event_scheduler.tcp_verbose:
+            print(f"TCP connection state updated to {new_state} for {connection_key}")
 
     def initiate_tcp_handshake(self, destination_ip, destination_mac, **kwargs):
         if not self.is_tcp_connection_established(
@@ -509,24 +662,40 @@ class Node:
                     f"Initiating TCP handshake: Sending SYN to {destination_ip}:{kwargs.get('destination_port')} from port {kwargs.get('source_port')}"
                 )
 
-                control_packet_kwargs = kwargs.copy()
-                control_packet_kwargs.update(
-                    {
-                        "flags": "SYN",
-                        "payload_size": 0,
-                    }
+            connection_key = (destination_ip, kwargs.get("destination_port"))
+            if connection_key not in self.tcp_connections:
+                self.initialize_connection_info(
+                    connection_key=connection_key,
+                    state="SYN_SENT",
+                    sequence_number=randint(1, 10000),
+                    acknowledgment_number=0,
+                    data=b"",
                 )
-                self.update_tcp_connection_state(
-                    destination_ip, kwargs.get("destination_port"), "SYN_SENT"
-                )
-                self._send_tcp_packet(
-                    destination_ip, destination_mac, b"", **control_packet_kwargs
+
+            control_packet_kwargs = {
+                "flags": "SYN",
+                "sequence_number": self.tcp_connections[connection_key][
+                    "sequence_number"
+                ],
+                "acknowledgment_number": 0,
+                "source_port": kwargs.get("source_port"),
+                "destination_port": kwargs.get("destination_port"),
+                "payload_size": 0,
+            }
+            self._send_tcp_packet(
+                destination_ip=destination_ip,
+                destination_mac=destination_mac,
+                data=b"",
+                **control_packet_kwargs,
+            )
+
+            self.tcp_connections[connection_key]["sequence_number"] += 1
+            if self.network_event_scheduler.tcp_verbose:
+                print(
+                    f"Connection state updated to SYN_SENT for {destination_ip}:{kwargs.get('destination_port')}"
                 )
 
     def _send_udp_packet(self, destination_ip, destination_mac, data, **kwargs):
-        print(
-            f"Sending UDP packet to {destination_ip}, {len(data)} bytes., kwargs={kwargs}"
-        )
         udp_header_size = 8
         ip_header_size = 20
         header_size = udp_header_size + ip_header_size
@@ -534,14 +703,155 @@ class Node:
             destination_ip, destination_mac, data, header_size, protocol="UDP", **kwargs
         )
 
+    def send_tcp_data_packet(self, packet, attempt=0):
+        connection_key = (packet.header["source_ip"], packet.header["source_port"])
+        if connection_key in self.tcp_connections:
+            if 'traffic_info' not in self.tcp_connections[connection_key]:
+                if self.network_event_scheduler.tcp_verbose:
+                    print(f"No traffic info found for {connection_key}")
+                return
+
+            traffic_info = self.tcp_connections[connection_key]['traffic_info']
+            if self.network_event_scheduler.current_time < traffic_info['end_time']:
+                if connection_key not in self.windows:
+                    self.windows[connection_key] = {}
+
+                while len(self.windows[connection_key]) < self.window_size:
+                    remaining_data = self.tcp_connections[connection_key]['data']
+                    payload_size = traffic_info['payload_size']
+                    data_to_send = remaining_data[:payload_size]
+
+                    if not data_to_send:
+                        break
+
+                    data_packet_kwargs = {
+                        "source_port": packet.header["destination_port"],
+                        "destination_port": packet.header["source_port"],
+                        "sequence_number": self.tcp_connections[connection_key]['sequence_number'],
+                        "acknowledgment_number": self.tcp_connections[connection_key]['acknowledgment_number'],
+                        "flags": "PSH"
+                    }
+
+                    self._send_tcp_packet(
+                        destination_ip=packet.header["source_ip"],
+                        destination_mac=packet.header["source_mac"],
+                        data=data_to_send,
+                        **data_packet_kwargs
+                    )
+
+                    sequence_number = self.tcp_connections[connection_key][
+                        "sequence_number"
+                    ]
+                    expected_ack_number = sequence_number + len(data_to_send)
+                    self.windows[connection_key][sequence_number] = {
+                        "packet_info": {
+                            "destination_ip": packet.header["source_ip"],
+                            "destination_mac": packet.header["source_mac"],
+                            "data": data_to_send,
+                            "kwargs": data_packet_kwargs,
+                        },
+                        "expected_ack_number": expected_ack_number,
+                        "attempt": attempt
+                    }
+                    self.schedule_timeout(connection_key, sequence_number)
+
+                    self.tcp_connections[connection_key]['data'] = remaining_data[payload_size:]
+                    self.tcp_connections[connection_key]['sequence_number'] += len(data_to_send)
+
     def _send_tcp_packet(self, destination_ip, destination_mac, data, **kwargs):
         tcp_header_size = 20
         ip_header_size = 20
         header_size = tcp_header_size + ip_header_size
 
-        self._send_ip_packet_data(
-            destination_ip, destination_mac, data, header_size, protocol="TCP", **kwargs
+        connection_key = (destination_ip, kwargs.get('destination_port'))
+        if connection_key in self.tcp_connections:
+            self._send_ip_packet_data(
+                destination_ip, destination_mac, data, header_size, protocol="TCP", **kwargs
+            )
+
+            if self.network_event_scheduler.tcp_verbose:
+                print(f"Sending TCP packet from {self.node_id} to {destination_ip}:{kwargs.get('destination_port')} with Flags: {kwargs.get('flags')}, Data Length: {len(data)}, Sequence Number: {kwargs.get('sequence_number')}, Acknowledgment Number: {kwargs.get('acknowledgment_number')}, ")
+
+    def schedule_timeout(self, connection_key, sequence_number):
+        event_time = self.network_event_scheduler.current_time + self.timeout_interval
+        event_id = self.network_event_scheduler.schedule_event(
+            event_time, self.handle_timeout, connection_key, sequence_number
         )
+        if sequence_number in self.windows[connection_key]:
+            self.windows[connection_key][sequence_number]["timeout_event_id"] = event_id
+
+    def handle_timeout(self, connection_key, sequence_number):
+        if (
+            connection_key in self.windows
+            and sequence_number in self.windows[connection_key]
+        ):
+            attempt = self.windows[connection_key][sequence_number]["attempt"]
+            packet_info = self.windows[connection_key][sequence_number]["packet_info"]
+
+            if attempt < self.max_attempts - 1:
+                if self.network_event_scheduler.tcp_verbose:
+                    print(
+                        f"Timeout for sequence number {sequence_number}. Retransmitting packet."
+                    )
+                self.retransmit_packet(connection_key, sequence_number)
+            else:
+                if self.network_event_scheduler.tcp_verbose:
+                    print(
+                        f"Maximum attempts reached for sequence number: {sequence_number}. Dropping packet."
+                    )
+                del self.windows[connection_key][
+                    sequence_number
+                ]
+
+    def cancel_timeout(self, connection_key, sequence_number):
+        if (
+            connection_key in self.windows
+            and sequence_number in self.windows[connection_key]
+        ):
+            event_id = self.windows[connection_key][sequence_number].get("timeout_event_id")
+            if event_id is not None:
+                self.network_event_scheduler.cancel_event(event_id)
+
+    def find_retransmit_sequence_number(self, connection_key):
+        if connection_key in self.windows:
+            unacknowledged_sequence_numbers = self.windows[connection_key].keys()
+            if unacknowledged_sequence_numbers:
+                min_unack_seq_num = min(unacknowledged_sequence_numbers)
+                return min_unack_seq_num
+        return None
+
+    def retransmit_packet(self, connection_key, sequence_number):
+        if (
+            connection_key in self.windows
+            and sequence_number in self.windows[connection_key]
+        ):
+            packet_info = self.windows[connection_key][sequence_number]["packet_info"]
+
+            destination_ip = packet_info["destination_ip"]
+            destination_mac = packet_info["destination_mac"]
+            data = packet_info["data"]
+            kwargs = packet_info["kwargs"]
+
+            if self.network_event_scheduler.tcp_verbose:
+                print(
+                    f"Retransmitting packet with sequence number {sequence_number} to {destination_ip}:{kwargs.get('destination_port')}"
+                )
+            self._send_tcp_packet(destination_ip, destination_mac, data, **kwargs)
+            self.windows[connection_key][sequence_number]["attempt"] += 1
+            if (
+                self.windows[connection_key][sequence_number]["attempt"]
+                >= self.max_attempts
+            ):
+                if self.network_event_scheduler.tcp_verbose:
+                    print(
+                        f"Maximum retransmission attempts reached for packet with sequence number {sequence_number}. Dropping the packet."
+                    )
+                del self.windows[connection_key][sequence_number]
+        else:
+            if self.network_event_scheduler.tcp_verbose:
+                print(
+                    f"No packet with sequence number {sequence_number} found in history for retransmission."
+                )
 
     def _send_ip_packet_data(
         self, destination_ip, destination_mac, data, header_size, protocol, **kwargs
@@ -550,18 +860,19 @@ class Node:
         total_size = len(data) if data else 1
         offset = 0
 
-        while offset < total_size:
+        while offset < total_size or (offset == 0 and total_size == 0):
             max_payload_size = self.mtu - header_size
             payload_size = min(max_payload_size, total_size - offset) if data else 0
 
             fragment_data = data[offset : offset + payload_size] if data else b""
             fragment_offset = offset
 
-            more_fragments = offset + payload_size < total_size
+            more_fragments = False if total_size == 0 else offset + payload_size < total_size
             fragment_flags = {
                 "more_fragments": more_fragments,
-                "original_data_id": original_data_id,
             }
+            if more_fragments or payload_size > 0:
+                fragment_flags["original_data_id"] = original_data_id
 
             if protocol == "UDP":
                 packet = UDPPacket(
@@ -594,8 +905,8 @@ class Node:
                     payload_size=payload_size,
                     source_port=kwargs.get("source_port"),
                     destination_port=kwargs.get("destination_port"),
-                    sequence_number=kwargs.get("sequence_number", ""),
-                    acknowledgment_number=kwargs.get("acknowledgment_number", ""),
+                    sequence_number=kwargs.get("sequence_number", 0),
+                    acknowledgment_number=kwargs.get("acknowledgment_number", 0),
                     flags=kwargs.get("flags", ""),
                 )
 
@@ -745,25 +1056,35 @@ class Node:
         source_port = self.select_random_port()
         destination_port = self.select_random_port()
 
-        def generate_packet():
-            if self.network_event_scheduler.current_time < end_time:
-                data = b"X" * payload_size
-                self.send_packet(
-                    destination_ip,
-                    data,
-                    protocol,
-                    source_port=source_port,
-                    destination_port=destination_port,
-                )
+        connection_key = (destination_ip, destination_port)
 
-                packet_size = header_size + payload_size
-                interval = (packet_size * 8) / bitrate * burstiness
-                self.network_event_scheduler.schedule_event(
-                    self.network_event_scheduler.current_time + interval,
-                    generate_packet,
-                )
+        if connection_key not in self.tcp_connections:
+            data = b"X" * (int(bitrate * duration) // 8)
+            self.initialize_connection_info(
+                connection_key=connection_key,
+                sequence_number=randint(1, 10000),
+                data=data
+            )
 
-        self.network_event_scheduler.schedule_event(start_time + 1, generate_packet)
+        self.tcp_connections[connection_key]["traffic_info"] = {
+            "end_time": end_time,
+            "payload_size": payload_size,
+            "header_size": header_size,
+            "bitrate": bitrate,
+            "burstiness": burstiness,
+            "next_sequence_number": self.tcp_connections[connection_key][
+                "sequence_number"
+            ],
+        }
+
+        self.send_packet(
+            destination_ip,
+            b"",
+            protocol="TCP",
+            source_port=source_port,
+            destination_port=destination_port,
+            flags="SYN",
+        )
 
     def resolve_destination_ip(self, destination_url):
         return self.url_to_ip_mapping.get(destination_url, None)
