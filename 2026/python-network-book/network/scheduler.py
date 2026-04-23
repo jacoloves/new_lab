@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
 import networkx as nx
 import heapq
+import random
 import numpy as np
 from collections import defaultdict
 
@@ -8,6 +10,7 @@ from collections import defaultdict
 class NetworkEventScheduler:
     def __init__(
         self,
+        seed=None,
         log_enabled=False,
         verbose=False,
         stp_verbose=False,
@@ -20,6 +23,7 @@ class NetworkEventScheduler:
         self.event_id = 0
         self.cancelled_events = set()  # キャンセルされたイベントIDを保持するセット
         self.packet_logs = {}
+        self.cwnd_log = []  # cwndの変化を記録するためのリスト
         self.log_enabled = log_enabled
         self.verbose = verbose
         self.stp_verbose = stp_verbose
@@ -27,6 +31,13 @@ class NetworkEventScheduler:
         self.nat_verbose = nat_verbose
         self.tcp_verbose = tcp_verbose
         self.graph = nx.Graph()
+
+        self.seed = seed
+        if seed is not None:
+            random.seed(seed)
+
+    def get_seed(self):
+        return self.seed
 
     def add_node(self, node_id, label, ip_addresses=None):
         self.graph.add_node(node_id, label=label, ip_addresses=ip_addresses)
@@ -224,6 +235,107 @@ class NetworkEventScheduler:
             )
             for event in log["events"]:
                 print(f"Time: {event['time']}, Event: {event['event']}")
+
+    def log_cwnd_event(self, log_entry):
+        self.cwnd_log.append(log_entry)
+        print(f"Logged cwnd event: {log_entry}")
+
+    def get_cwnd_log(self):
+        return self.cwnd_log
+
+    def plot_cwnd_log(self):
+        if not self.cwnd_log:
+            print("No cwnd log data to plot.")
+            return
+
+        colors = plt.cm.tab10.colors  # 色のパレットを用意
+        state_styles = {
+            "slow_start": "solid",
+            "congestion_avoidance": "dashed",
+            "fast_recovery": "dotted",
+        }
+        connections = {}
+        connection_colors = {}
+
+        # コネクションごとにログを整理
+        for entry in self.cwnd_log:
+            time = entry["time"]
+            connection = entry["connection"]
+            cwnd = entry["cwnd"]
+            state = entry["state"]
+            if connection not in connections:
+                connections[connection] = {"time": [], "cwnd": [], "state": []}
+                connection_colors[connection] = colors[
+                    len(connection_colors) % len(colors)
+                ]
+            connections[connection]["time"].append(time)
+            connections[connection]["cwnd"].append(cwnd)
+            connections[connection]["state"].append(state)
+
+        # グラフの描画
+        plt.figure(figsize=(14, 7))
+        for connection, data in connections.items():
+            times = data["time"]
+            cwnds = data["cwnd"]
+            states = data["state"]
+            color = connection_colors[connection]
+
+            # 状態ごとに分割してプロット
+            start_idx = 0
+            for i in range(1, len(times)):
+                if states[i] != states[start_idx]:
+                    plt.plot(
+                        times[start_idx : i + 1],
+                        cwnds[start_idx : i + 1],
+                        color=color,
+                        linestyle=state_styles[states[start_idx]],
+                        label=connection if start_idx == 0 else "",
+                    )
+                    start_idx = i
+            # 最後の区間をプロット
+            plt.plot(
+                times[start_idx:],
+                cwnds[start_idx:],
+                color=color,
+                linestyle=state_styles[states[start_idx]],
+            )
+
+        # 凡例の作成
+        handles = []
+        for connection, color in connection_colors.items():
+            handles.append(mlines.Line2D([], [], color=color, label=connection))
+
+        # 線のスタイルの凡例を追加
+        style_handles = [
+            mlines.Line2D(
+                [],
+                [],
+                color="black",
+                linestyle=state_styles["slow_start"],
+                label="slow_start",
+            ),
+            mlines.Line2D(
+                [],
+                [],
+                color="black",
+                linestyle=state_styles["congestion_avoidance"],
+                label="congestion_avoidance",
+            ),
+            mlines.Line2D(
+                [],
+                [],
+                color="black",
+                linestyle=state_styles["fast_recovery"],
+                label="fast_recovery",
+            ),
+        ]
+        plt.legend(handles=handles + style_handles, loc="upper left")
+
+        # ラベルとタイトルの設定
+        plt.xlabel("Time")
+        plt.ylabel("Congestion Window (cwnd)")
+        plt.title("Congestion Window Size over Time")
+        plt.show()
 
     def generate_summary(self, packet_logs):
         # パケットタイプとソース宛先ペアでの集計データを保持するための辞書

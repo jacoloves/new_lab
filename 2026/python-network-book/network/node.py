@@ -21,8 +21,11 @@ class Node:
         default_route=None,
     ):
         self.node_id = node_id
-        self.network_event_scheduler = network_event_scheduler
         self.ip_address = ip_address
+        self.network_event_scheduler = network_event_scheduler
+        self.local_seed = self.network_event_scheduler.get_seed()
+        if self.local_seed is not None:
+            random.seed(self.local_seed)
         if mac_address is None:
             self.mac_address = self.generate_mac_address()
         else:
@@ -33,8 +36,11 @@ class Node:
         self.used_ports = set()
         self.port_mapping = {}
         self.tcp_connections = {}
-        self.window_size = 4
-        self.max_attempts = 3
+        self.cwnd = 1
+        self.ssthresh = 16
+        self.MAX_CWND = 64
+        self.tcp_state = {}
+        self.max_attempts = 10
         self.windows = {}
         self.timeout_interval = 2
         self.scheduled_timeouts = {}
@@ -47,7 +53,7 @@ class Node:
         self.mtu = mtu
         self.fragmented_packets = {}
         self.default_route = default_route
-        label = f"Node {node_id}\n{self.mac_address}"
+        label = f"Node {node_id}\n{mac_address}"
 
         self.schedule_dhcp_packet()
         self.network_event_scheduler.add_node(node_id, label, ip_addresses=[ip_address])
@@ -270,12 +276,6 @@ class Node:
 
                 if "ACK" in flags:
                     self.handle_acknowledgement(packet)
-                    if self.check_duplication_threshold(
-                        packet
-                    ):
-                        self.check_and_retransmit_packets(packet)
-                    else:
-                        self.send_tcp_data_packet(packet)
 
                 if "PSH" in flags:
                     self.update_ACK_number(packet)
@@ -305,7 +305,42 @@ class Node:
             "data": data,
             "last_ack_number": None,
             "duplicate_ack_count": 0,
+            "cwnd": self.cwnd,
+            "ssthresh": self.ssthresh,
+            "congestion_state": "slow_start",
         }
+
+    def transition_to_state(self, connection_key, new_state):
+        if connection_key not in self.tcp_connections:
+            return
+
+        current_state = self.tcp_connections[connection_key]["congestion_state"]
+        if current_state == new_state:
+            return
+
+        cwnd = self.tcp_connections[connection_key]["cwnd"]
+        ssthresh = self.tcp_connections[connection_key]["ssthresh"]
+
+        if new_state == "slow_start":
+            self.tcp_connections[connection_key]["cwnd"] = 1
+            self.tcp_connections[connection_key]["ssthresh"] = max(cwnd // 2, 2)
+            self.tcp_connections[connection_key]["congestion_state"] = new_state
+            if self.network_event_scheduler.tcp_verbose:
+                print(
+                    f"Transitioning to {new_state} for connection {connection_key}. ssthresh set to {ssthresh}, cwnd reset to 1."
+                )
+
+        elif new_state == "congestion_avoidance":
+            self.tcp_connections[connection_key]["congestion_state"] = new_state
+            if self.network_event_scheduler.tcp_verbose:
+                print(
+                    f"Transitioning to {new_state} for connection {connection_key}. Continuing to increase cwnd linearly."
+
+                )
+
+        self.log_congestion_window(
+            connection_key, self.tcp_connections[connection_key]["cwnd"], new_state
+        )
 
     def handle_acknowledgement(self, packet):
         connection_key = (packet.header["source_ip"], packet.header["source_port"])
@@ -319,12 +354,24 @@ class Node:
                 connection_key
             ] = {}
 
+        self.remove_acked_packets_from_window(connection_key, ack_number)
+
         if self.tcp_connections[connection_key]["last_ack_number"] == ack_number:
             self.tcp_connections[connection_key]["duplicate_ack_count"] += 1
+            if self.tcp_connections[connection_key]["duplicate_ack_count"] >= 3:
+                self.fast_retransmit(packet)
+            else:
+                if self.tcp_connections[connection_key]["data"] is not None:
+                    self.adjust_congestion_window(connection_key)
+                    self.send_tcp_data_packet(packet)
         else:
-            self.tcp_connections[connection_key]["duplicate_ack_count"] = 1
+            self.tcp_connections[connection_key]["duplicate_ack_count"] = 0
             self.tcp_connections[connection_key]["last_ack_number"] = ack_number
+            if self.tcp_connections[connection_key]["data"] is not None:
+                self.adjust_congestion_window(connection_key)
+                self.send_tcp_data_packet(packet)
 
+    def remove_acked_packets_from_window(self, connection_key, ack_number):
         for seq, packet_info in list(self.windows[connection_key].items()):
             if packet_info["expected_ack_number"] <= ack_number:
                 if self.network_event_scheduler.tcp_verbose:
@@ -334,8 +381,67 @@ class Node:
                 self.cancel_timeout(connection_key, seq)
                 del self.windows[connection_key][seq]
 
-                if self.tcp_connections[connection_key]["data"]:
-                    self.send_tcp_data_packet(packet)
+    def fast_retransmit(self, packet):
+        connection_key = (packet.header["source_ip"], packet.header["source_port"])
+        self.tcp_connections[connection_key]["ssthresh"] = max(
+            self.tcp_connections[connection_key]["cwnd"] // 2, 2
+        )
+        self.tcp_connections[connection_key]["cwnd"] = 1
+        self.transition_to_state(connection_key, "slow_start")
+        self.schedule_retransmission(connection_key)
+
+    def schedule_retransmission(self, connection_key):
+        sequence_number = self.find_retransmit_sequence_number(connection_key)
+        if sequence_number is not None:
+            event_time = (
+                self.network_event_scheduler.current_time + self.timeout_interval / 2
+            )
+            self.network_event_scheduler.schedule_event(
+                event_time, self.retransmit_packet, connection_key, sequence_number
+            )
+        else:
+            if self.network_event_scheduler.tcp_verbose:
+                print(f"No packets to retransmit for connection {connection_key}")
+
+    def log_congestion_window(self, connection_key, cwnd, state):
+        log_entry = {
+            "time": self.network_event_scheduler.current_time,
+            "connection_": connection_key,
+            "cwnd": cwnd,
+            "state": state,
+        }
+        self.network_event_scheduler.log_cwnd_event(log_entry)
+
+    def adjust_congestion_window(self, connection_key):
+        if connection_key not in self.tcp_connections:
+            return
+
+        state = self.tcp_connections[connection_key]["congestion_state"]
+        cwnd = self.tcp_connections[connection_key]["cwnd"]
+        ssthresh = self.tcp_connections[connection_key]["ssthresh"]
+
+        if state == "slow_start":
+            new_cwnd = min(cwnd + 1, self.MAX_CWND)
+            self.tcp_connections[connection_key]["cwnd"] = new_cwnd
+            self.log_congestion_window(connection_key, new_cwnd, "slow_start")
+
+            if self.network_event_scheduler.tcp_verbose:
+                print(
+                    f"Updated cwnd to {new_cwnd} for connection {connection_key} in slow start."
+                )
+
+            if new_cwnd >= ssthresh:
+                self.transition_to_state(connection_key, "congestion_avoidance")
+
+        elif state == "congestion_avoidance":
+            new_cwnd = min(cwnd + (1 / cwnd), self.MAX_CWND)
+            self.tcp_connections[connection_key]["cwnd"] = new_cwnd
+            self.log_congestion_window(connection_key, new_cwnd, "congestion_avoidance")
+
+            if self.network_event_scheduler.tcp_verbose:
+                print(
+                    f"Updated cwnd to {new_cwnd} for connection {connection_key} in congestion avoidance."
+                )
 
     def check_duplication_threshold(self, packet):
         connection_key = (packet.header["source_ip"], packet.header["source_port"])
@@ -348,18 +454,13 @@ class Node:
                     print(
                         f"Duplicate ACK threshold reached for connection {connection_key} with ACK number {last_ack_number}."
                     )
+                
+                self.transition_to_state(connection_key, "slow_start")
+
                 return True
             else:
                 return False
         return False
-
-    def check_and_retransmit_packets(self, packet):
-        connection_key = (packet.header["source_ip"], packet.header["source_port"])
-        sequence_number = self.find_retransmit_sequence_number(connection_key)
-        if sequence_number is not None:
-            self.retransmit_packet(connection_key, sequence_number)
-        else:
-            print(f"No packets to retransmit for connection {connection_key}")
 
     def update_ACK_number(self, packet):
         connection_key = (packet.header["source_ip"], packet.header["source_port"])
@@ -373,20 +474,30 @@ class Node:
             "acknowledgment_number"
         ]
 
-        received_set = self.tcp_connections[connection_key].setdefault(
+        received_sequence_numbers = self.tcp_connections[connection_key].setdefault(
             "received_sequence_number", set()
         )
-        for seq in range(seq_start, seq_start + payload_length):
-            received_set.add(seq)
+        for seq in range(
+            received_sequence_number, received_sequence_number + payload_length
+        ):
+            received_sequence_number.add(seq)
+
+        out_of_order_packets = self.tcp_connections[connection_key].setdefault(
+            "out_of_order_packets", []
+        )
 
         next_expected_seq = current_ack_number
-        while next_expected_seq in received_set:
+        while next_expected_seq in received_sequence_number:
             next_expected_seq += 1
 
         if next_expected_seq != current_ack_number:
             self.tcp_connections[connection_key]["acknowledgment_number"] = (
                 next_expected_seq
             )
+
+            while out_of_order_packets and out_of_order_packets[0] == next_expected_seq:
+
+
             if self.network_event_scheduler.tcp_verbose:
                 print(
                     f"Updated ACK number to {next_expected_seq} for connection {connection_key}."
