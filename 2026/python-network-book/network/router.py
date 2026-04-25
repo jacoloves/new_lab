@@ -19,6 +19,9 @@ class Router:
         nat_table=None,
     ):
         self.network_event_scheduler = network_event_scheduler
+        self.local_seed = self.network_event_scheduler.get_seed()
+        if self.local_seed is not None:
+            random.seed(self.local_seed)
         self.node_id = node_id
         self.links = []
         self.available_ips = {

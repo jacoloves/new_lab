@@ -406,7 +406,7 @@ class Node:
     def log_congestion_window(self, connection_key, cwnd, state):
         log_entry = {
             "time": self.network_event_scheduler.current_time,
-            "connection_": connection_key,
+            "connection": connection_key,
             "cwnd": cwnd,
             "state": state,
         }
@@ -477,17 +477,15 @@ class Node:
         received_sequence_numbers = self.tcp_connections[connection_key].setdefault(
             "received_sequence_number", set()
         )
-        for seq in range(
-            received_sequence_number, received_sequence_number + payload_length
-        ):
-            received_sequence_number.add(seq)
+        for seq in range(seq_start, seq_start + payload_length):
+            received_sequence_numbers.add(seq)
 
         out_of_order_packets = self.tcp_connections[connection_key].setdefault(
             "out_of_order_packets", []
         )
 
         next_expected_seq = current_ack_number
-        while next_expected_seq in received_sequence_number:
+        while next_expected_seq in received_sequence_numbers:
             next_expected_seq += 1
 
         if next_expected_seq != current_ack_number:
@@ -496,14 +494,20 @@ class Node:
             )
 
             while out_of_order_packets and out_of_order_packets[0] == next_expected_seq:
+                next_expected_seq += 1
+                out_of_order_packets.pop(0)
 
-
+            self.tcp_connections[connection_key]["out_of_order_packets"] = (
+                out_of_order_packets
+            )
             if self.network_event_scheduler.tcp_verbose:
                 print(
                     f"Updated ACK number to {next_expected_seq} for connection {connection_key}."
                 )
         else:
-            pass
+            if seq_start + payload_length not in out_of_order_packets:
+                out_of_order_packets.append(seq_start + payload_length)
+                out_of_order_packets.sort()
 
     def send_TCP_SYN_ACK(self, packet):
         connection_key = (packet.header["source_ip"], packet.header["source_port"])
@@ -517,7 +521,7 @@ class Node:
                 state="SYN_RECEIVED",
                 sequence_number=sequence_number,
                 acknowledgment_number=acknowledgment_number,
-                data=b"",
+                data=None,
             )
 
         control_packet_kwargs = {
@@ -827,13 +831,16 @@ class Node:
                 if connection_key not in self.windows:
                     self.windows[connection_key] = {}
 
-                while len(self.windows[connection_key]) < self.window_size:
+                if (
+                    len(self.windows[connection_key])
+                    < self.tcp_connections[connection_key]["cwnd"]
+                ):
                     remaining_data = self.tcp_connections[connection_key]['data']
+                    if not remaining_data:
+                        return
+
                     payload_size = traffic_info['payload_size']
                     data_to_send = remaining_data[:payload_size]
-
-                    if not data_to_send:
-                        break
 
                     data_packet_kwargs = {
                         "source_port": packet.header["destination_port"],
@@ -869,6 +876,9 @@ class Node:
                     self.tcp_connections[connection_key]['data'] = remaining_data[payload_size:]
                     self.tcp_connections[connection_key]['sequence_number'] += len(data_to_send)
 
+                    if self.tcp_connections[connection_key]["data"]:
+                        self.send_tcp_data_packet(packet, attempt)
+
     def _send_tcp_packet(self, destination_ip, destination_mac, data, **kwargs):
         tcp_header_size = 20
         ip_header_size = 20
@@ -888,8 +898,9 @@ class Node:
         event_id = self.network_event_scheduler.schedule_event(
             event_time, self.handle_timeout, connection_key, sequence_number
         )
-        if sequence_number in self.windows[connection_key]:
-            self.windows[connection_key][sequence_number]["timeout_event_id"] = event_id
+        if "timeout_event_ids" not in self.tcp_connections[connection_key]:
+            self.tcp_connections[connection_key]["timeout_event_ids"] = []
+        self.tcp_connections[connection_key]["timeout_event_ids"].append(event_id)
 
     def handle_timeout(self, connection_key, sequence_number):
         if (
@@ -914,14 +925,21 @@ class Node:
                     sequence_number
                 ]
 
+            self.transition_to_state(connection_key, "slow_start")
+
+            if self.network_event_scheduler.tcp_verbose:
+                print(
+                    f"Timeout handled for connection {connection_key}. State transitioned to slow_start."
+                )
+
     def cancel_timeout(self, connection_key, sequence_number):
         if (
-            connection_key in self.windows
-            and sequence_number in self.windows[connection_key]
+            connection_key in self.tcp_connections
+            and "timeout_event_ids" in self.tcp_connections[connection_key]
         ):
-            event_id = self.windows[connection_key][sequence_number].get("timeout_event_id")
-            if event_id is not None:
+            for event_id in self.tcp_connections[connection_key]["timeout_event_ids"]:
                 self.network_event_scheduler.cancel_event(event_id)
+            self.tcp_connections[connection_key]["timeout_event_ids"] = []
 
     def find_retransmit_sequence_number(self, connection_key):
         if connection_key in self.windows:
@@ -958,6 +976,8 @@ class Node:
                         f"Maximum retransmission attempts reached for packet with sequence number {sequence_number}. Dropping the packet."
                     )
                 del self.windows[connection_key][sequence_number]
+            else:
+                self.schedule_retransmission(connection_key)
         else:
             if self.network_event_scheduler.tcp_verbose:
                 print(
