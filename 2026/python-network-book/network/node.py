@@ -550,7 +550,7 @@ class Node:
             destination_ip=packet.header["source_ip"],
             destination_mac=packet.header["source_mac"],
             data=b"",
-            **control_packet_kwargs,
+            dscp=packet.header["dscp"] ** control_packet_kwargs,
         )
 
         self.update_tcp_connection_state(connection_key, "ESTABLISHED")
@@ -586,6 +586,7 @@ class Node:
                 destination_ip=packet.header["source_ip"],
                 destination_mac=packet.header["source_mac"],
                 data=b"",
+                dscp=packet.header["dscp"],
                 **control_packet_kwargs,
             )
         else:
@@ -738,7 +739,7 @@ class Node:
         )
         self._send_packet(arp_reply_packet)
 
-    def send_packet(self, destination_ip, data, protocol="UDP", **kwargs):
+    def send_packet(self, destination_ip, data, protocol="UDP", dscp, **kwargs):
         destination_mac = self.get_mac_address_from_ip(destination_ip)
 
         if destination_mac is None:
@@ -813,6 +814,7 @@ class Node:
                 destination_ip=destination_ip,
                 destination_mac=destination_mac,
                 data=b"",
+                dscp=dscp,
                 **control_packet_kwargs,
             )
 
@@ -822,12 +824,18 @@ class Node:
                     f"Connection state updated to SYN_SENT for {destination_ip}:{kwargs.get('destination_port')}"
                 )
 
-    def _send_udp_packet(self, destination_ip, destination_mac, data, **kwargs):
+    def _send_udp_packet(self, destination_ip, destination_mac, data, dscp, **kwargs):
         udp_header_size = 8
         ip_header_size = 20
         header_size = udp_header_size + ip_header_size
         self._send_ip_packet_data(
-            destination_ip, destination_mac, data, header_size, protocol="UDP", **kwargs
+            destination_ip,
+            destination_mac,
+            data,
+            dscp,
+            header_size,
+            protocol="UDP",
+            **kwargs,
         )
 
     def send_tcp_data_packet(self, packet, attempt=0):
@@ -870,6 +878,7 @@ class Node:
                         destination_ip=packet.header["source_ip"],
                         destination_mac=packet.header["source_mac"],
                         data=data_to_send,
+                        dscp=packet.header["dscp"],
                         **data_packet_kwargs,
                     )
 
@@ -882,6 +891,7 @@ class Node:
                             "destination_ip": packet.header["source_ip"],
                             "destination_mac": packet.header["source_mac"],
                             "data": data_to_send,
+                            "dscp": packet.header["dscp"],
                             "kwargs": data_packet_kwargs,
                         },
                         "expected_ack_number": expected_ack_number,
@@ -899,7 +909,7 @@ class Node:
                     if self.tcp_connections[connection_key]["data"]:
                         self.send_tcp_data_packet(packet, attempt)
 
-    def _send_tcp_packet(self, destination_ip, destination_mac, data, **kwargs):
+    def _send_tcp_packet(self, destination_ip, destination_mac, data, dscp, **kwargs):
         tcp_header_size = 20
         ip_header_size = 20
         header_size = tcp_header_size + ip_header_size
@@ -910,6 +920,7 @@ class Node:
                 destination_ip,
                 destination_mac,
                 data,
+                dscp,
                 header_size,
                 protocol="TCP",
                 **kwargs,
@@ -984,6 +995,7 @@ class Node:
             destination_ip = packet_info["destination_ip"]
             destination_mac = packet_info["destination_mac"]
             data = packet_info["data"]
+            dscp = packet_info["dscp"]
             kwargs = packet_info["kwargs"]
 
             if self.network_event_scheduler.tcp_verbose:
@@ -1011,7 +1023,14 @@ class Node:
                 )
 
     def _send_ip_packet_data(
-        self, destination_ip, destination_mac, data, header_size, protocol, **kwargs
+        self,
+        destination_ip,
+        destination_mac,
+        data,
+        dscp,
+        header_size,
+        protocol,
+        **kwargs,
     ):
         original_data_id = str(uuid.uuid4())
         total_size = len(data) if data else 1
@@ -1040,6 +1059,7 @@ class Node:
                     source_ip=self.ip_address,
                     destination_ip=destination_ip,
                     ttl=64,
+                    dscp=dscp,
                     data=fragment_data,
                     network_event_scheduler=self.network_event_scheduler,
                     fragment_flags=fragment_flags,
@@ -1056,6 +1076,7 @@ class Node:
                     source_ip=self.ip_address,
                     destination_ip=destination_ip,
                     ttl=64,
+                    dscp=dscp,
                     data=fragment_data,
                     network_event_scheduler=self.network_event_scheduler,
                     fragment_flags=fragment_flags,
@@ -1094,11 +1115,11 @@ class Node:
         payload_size,
         burstiness=1.0,
         protocol="UDP",
+        dscp=0,
     ):
         def attempt_to_start_traffic():
-            destination_ip = self.resolve_destination_ip(destination_url)
-            if destination_ip is None:
-                self.send_dns_query_and_set_traffic(
+            if self.is_valid_cidr_notation(destination_url):
+                self.set_udp_traffic(
                     destination_url,
                     bitrate,
                     start_time,
@@ -1107,18 +1128,34 @@ class Node:
                     payload_size,
                     burstiness,
                     protocol,
+                    dscp,
                 )
             else:
-                self.set_udp_traffic(
-                    destination_ip,
-                    bitrate,
-                    start_time,
-                    duration,
-                    header_size,
-                    payload_size,
-                    burstiness,
-                    protocol,
-                )
+                destination_ip = self.resolve_destination_ip(destination_url)
+                if destination_ip is None:
+                    self.send_dns_query_and_set_traffic(
+                        destination_url,
+                        bitrate,
+                        start_time,
+                        duration,
+                        header_size,
+                        payload_size,
+                        burstiness,
+                        protocol,
+                        dscp,
+                    )
+                else:
+                    self.set_udp_traffic(
+                        destination_ip,
+                        bitrate,
+                        start_time,
+                        duration,
+                        header_size,
+                        payload_size,
+                        burstiness,
+                        protocol,
+                        dscp,
+                    )
 
         self.network_event_scheduler.schedule_event(
             start_time, attempt_to_start_traffic
@@ -1134,6 +1171,7 @@ class Node:
         payload_size,
         burstiness=1.0,
         protocol="UDP",
+        dscp=0,
     ):
         end_time = start_time + duration
         source_port = self.select_random_port()
@@ -1146,6 +1184,7 @@ class Node:
                     destination_ip,
                     data,
                     protocol,
+                    dscp,
                     source_port=source_port,
                     destination_port=destination_port,
                 )
@@ -1171,11 +1210,11 @@ class Node:
         payload_size,
         burstiness=1.0,
         protocol="TCP",
+        dscp=0,
     ):
         def attempt_to_start_traffic():
-            destination_ip = self.resolve_destination_ip(destination_url)
-            if destination_ip is None:
-                self.send_dns_query_and_set_traffic(
+            if self.is_valid_cidr_notation(destination_url):
+                self.set_tcp_traffic(
                     destination_url,
                     bitrate,
                     start_time,
@@ -1183,18 +1222,35 @@ class Node:
                     header_size,
                     payload_size,
                     burstiness,
-                    protocol="TCP",
+                    protocol,
+                    dscp,
                 )
             else:
-                self.set_tcp_traffic(
-                    destination_ip,
-                    bitrate,
-                    start_time,
-                    duration,
-                    header_size,
-                    payload_size,
-                    burstiness,
-                )
+                destination_ip = self.resolve_destination_ip(destination_url)
+                if destination_ip is None:
+                    self.send_dns_query_and_set_traffic(
+                        destination_url,
+                        bitrate,
+                        start_time,
+                        duration,
+                        header_size,
+                        payload_size,
+                        burstiness,
+                        protocol,
+                        dscp,
+                    )
+                else:
+                    self.set_tcp_traffic(
+                        destination_ip,
+                        bitrate,
+                        start_time,
+                        duration,
+                        header_size,
+                        payload_size,
+                        burstiness,
+                        protocol,
+                        dscp,
+                    )
 
         self.network_event_scheduler.schedule_event(
             start_time, attempt_to_start_traffic
@@ -1210,6 +1266,7 @@ class Node:
         payload_size,
         burstiness=1.0,
         protocol="TCP",
+        dscp=0,
     ):
         end_time = start_time + duration
         source_port = self.select_random_port()
@@ -1239,7 +1296,8 @@ class Node:
         self.send_packet(
             destination_ip,
             b"",
-            protocol="TCP",
+            protocol,
+            dscp,
             source_port=source_port,
             destination_port=destination_port,
             flags="SYN",
@@ -1258,6 +1316,7 @@ class Node:
         payload_size,
         burstiness=1.0,
         protocol="UDP",
+        dscp=0,
     ):
         if destination_url not in self.waiting_for_dns_reply:
             self.waiting_for_dns_reply[destination_url] = []
@@ -1270,6 +1329,7 @@ class Node:
                 payload_size,
                 burstiness,
                 protocol,
+                dscp,
             )
         )
         self.send_dns_query(destination_url)
@@ -1301,6 +1361,7 @@ class Node:
                     payload_size,
                     burstiness,
                     protocol,
+                    dscp,
                 ) = parameters
                 if protocol == "UDP":
                     self.set_udp_traffic(
@@ -1311,6 +1372,7 @@ class Node:
                         header_size,
                         payload_size,
                         burstiness,
+                        dscp,
                     )
                 elif protocol == "TCP":
                     self.set_tcp_traffic(
@@ -1321,6 +1383,7 @@ class Node:
                         header_size,
                         payload_size,
                         burstiness,
+                        dscp,
                     )
             del self.waiting_for_dns_reply[query_domain]
 

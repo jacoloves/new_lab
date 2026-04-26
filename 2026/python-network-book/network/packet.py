@@ -14,6 +14,7 @@ class Packet:
         header_size,
         payload_size,
         network_event_scheduler,
+        dscp=0,
     ):
         self.network_event_scheduler = network_event_scheduler
         self.id = str(uuid.uuid4())
@@ -24,6 +25,7 @@ class Packet:
             "ttl": ttl,
             "fragment_flags": fragment_flags,
             "fragment_offset": fragment_offset,
+            "dscp": dscp,
         }
 
         self.size = header_size + payload_size
@@ -39,6 +41,27 @@ class Packet:
 
     def add_mac_header(self, source_mac, destination_mac):
         self.mac_header = {"source_mac": source_mac, "destination_mac": destination_mac}
+
+    # [q] なぜDSCPのプライオリティは8刻みなのか？
+    def get_priority(self):
+        dscp = self.ip_header["dscp"]
+        if dscp >= 56:
+            return 7
+        elif dscp >= 48:
+            return 6
+        elif dscp >= 40:
+            return 5
+        elif dscp >= 32:
+            return 4
+        elif dscp >= 24:
+            return 3
+        elif dscp >= 16:
+            return 2
+        elif dscp > 8:
+            return 1
+        else:
+            return 0
+
 
     def set_arrived(self, arrival_time):
         self.arrival_time = arrival_time
@@ -107,6 +130,7 @@ class ARPPacket(Packet):
             ttl=1,
             fragment_flags={},
             fragment_offset=0,
+            dscp=56,
             header_size=28,
             payload_size=28,
             network_event_scheduler=network_event_scheduler,
@@ -141,6 +165,7 @@ class DNSPacket(Packet):
             source_ip=source_ip,
             destination_ip=destination_ip,
             ttl=64,
+            dscp=56,
             fragment_flags={},
             fragment_offset=0,
             header_size=0,
@@ -172,6 +197,7 @@ class DHCPPacket(Packet):
             source_ip=source_ip,
             destination_ip=destination_ip,
             ttl=255,
+            dscp=56,
             fragment_flags={},
             fragment_offset=0,
             header_size=240,
@@ -207,6 +233,7 @@ class BPDU(Packet):
             ttl=1,
             fragment_flags={},
             fragment_offset=0,
+            dscp=56,
             header_size=20,
             payload_size=50,
             network_event_scheduler=network_event_scheduler,
@@ -240,6 +267,7 @@ class HelloPacket(Packet):
             ttl=1,
             fragment_flags={},
             fragment_offset=0,
+            dscp=56,
             header_size=24,
             payload_size=20,
             network_event_scheduler=network_event_scheduler,
@@ -271,6 +299,7 @@ class LSAPacket(Packet):
             source_ip=source_ip,
             destination_ip="224.0.0.5",
             ttl=1,
+            dscp=56,
             fragment_flags={},
             fragment_offset=0,
             header_size=24,
