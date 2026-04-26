@@ -1,5 +1,6 @@
 import heapq
 import random
+from collections import defaultdict
 from .switch import Switch
 from .router import Router
 from .packet import Packet, TCPPacket, UDPPacket
@@ -25,6 +26,9 @@ class Link:
 
         self.is_transferring_xy = False
         self.is_transferring_yx = False
+
+        self.rr_index_xy = 0  # ラウンドロビンで次に読み出す優先度（0〜7）
+        self.rr_index_yx = 0
 
         # IPアドレスの選択とリンクの設定
         ip_x, ip_y = self.setup_link_ips(node_x, node_y)
@@ -154,64 +158,80 @@ class Link:
             )
 
     def transfer_packet(self, from_node):
-        if from_node == self.node_x:
+        is_xy = from_node == self.node_x
+        if is_xy:
             priority_queues = self.priority_queues_xy
             self.is_transferring_xy = True
+            rr_index = self.rr_index_xy
         else:
             priority_queues = self.priority_queues_yx
             self.is_transferring_yx = True
+            rr_index = self.rr_index_yx
 
-        for priority in sorted(priority_queues.keys(), reverse=True):
-            queue = priority_queues[priority]
-            if queue:
-                dequeue_time, packet, _ = heapq.heappop(queue)
-                packet_transfer_time = (packet.size * 8) / self.bandwidth
-                if self.network_event_scheduler.link_verbose:
-                    print(
-                        f"{self.network_event_scheduler.current_time:.6f}: Packet transferred from Link {self.node_x.node_id}-{self.node_y.node_id} to {from_node.node_id}. Packet size: {packet.size} bytes, Priority: {packet.get_priority()}"
-                    )
+        # パケットが存在する優先度キューの一覧（昇順）
+        active_priorities = sorted(p for p, q in priority_queues.items() if q)
 
-                if self.should_drop_packet(packet):
-                    if self.network_event_scheduler.link_verbose:
-                        print(
-                            f"{self.network_event_scheduler.current_time:.6f}: Packet dropped at Link {self.node_x.node_id}-{self.node_y.node_id}."
-                        )
-                    packet.set_arrived(-1)
-                else:
-                    next_node = self.node_x if from_node != self.node_x else self.node_y
-                    self.network_event_scheduler.schedule_event(
-                        self.network_event_scheduler.current_time + self.delay,
-                        next_node.receive_packet,
-                        packet,
-                        self,
-                    )
+        if not active_priorities:
+            if is_xy:
+                self.is_transferring_xy = False
+            else:
+                self.is_transferring_yx = False
+            return
 
-                print(
-                    f"{self.network_event_scheduler.current_time:.6f}, packet_transfer_time: {packet_transfer_time}"
-                )
-                if any(priority_queues.values()):
-                    self.network_event_scheduler.schedule_event(
-                        self.network_event_scheduler.current_time
-                        + packet_transfer_time,
-                        self.transfer_packet,
-                        from_node,
-                    )
-                    if self.network_event_scheduler.link_verbose:
-                        print(
-                            f"{self.network_event_scheduler.current_time:.6f}: Schedule next packet transfer after {packet_transfer_time} seconds"
-                        )
-                else:
-                    print(
-                        f"{self.network_event_scheduler.current_time:.6f}, queue is empty"
-                    )
-                    if from_node == self.node_x:
-                        self.is_transferring_xy = False
-                    else:
-                        self.is_transferring_yx = False
+        # ラウンドロビン: rr_index以上の優先度から選び、なければ先頭に戻る
+        next_priority = next(
+            (p for p in active_priorities if p >= rr_index),
+            active_priorities[0],
+        )
 
-                break
+        dequeue_time, packet, _ = heapq.heappop(priority_queues[next_priority])
+        packet_transfer_time = (packet.size * 8) / self.bandwidth
+
+        # 次回は今回の優先度の次から読み出す（0〜7でループ）
+        new_rr_index = (next_priority + 1) % 8
+        if is_xy:
+            self.rr_index_xy = new_rr_index
         else:
-            if from_node == self.node_x:
+            self.rr_index_yx = new_rr_index
+
+        if self.network_event_scheduler.link_verbose:
+            print(
+                f"{self.network_event_scheduler.current_time:.6f}: Packet transferred from Link {self.node_x.node_id}-{self.node_y.node_id} to {from_node.node_id}. Packet size: {packet.size} bytes, Priority: {next_priority}"
+            )
+
+        if self.should_drop_packet(packet):
+            if self.network_event_scheduler.link_verbose:
+                print(
+                    f"{self.network_event_scheduler.current_time:.6f}: Packet dropped at Link {self.node_x.node_id}-{self.node_y.node_id}."
+                )
+            packet.set_arrived(-1)
+        else:
+            next_node = self.node_x if from_node != self.node_x else self.node_y
+            self.network_event_scheduler.schedule_event(
+                self.network_event_scheduler.current_time + self.delay,
+                next_node.receive_packet,
+                packet,
+                self,
+            )
+
+        print(
+            f"{self.network_event_scheduler.current_time:.6f}, packet_transfer_time: {packet_transfer_time}"
+        )
+        if any(priority_queues.values()):
+            self.network_event_scheduler.schedule_event(
+                self.network_event_scheduler.current_time + packet_transfer_time,
+                self.transfer_packet,
+                from_node,
+            )
+            if self.network_event_scheduler.link_verbose:
+                print(
+                    f"{self.network_event_scheduler.current_time:.6f}: Schedule next packet transfer after {packet_transfer_time} seconds"
+                )
+        else:
+            print(
+                f"{self.network_event_scheduler.current_time:.6f}, queue is empty"
+            )
+            if is_xy:
                 self.is_transferring_xy = False
             else:
                 self.is_transferring_yx = False

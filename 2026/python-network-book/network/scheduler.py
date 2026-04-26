@@ -17,6 +17,7 @@ class NetworkEventScheduler:
         routing_verbose=False,
         nat_verbose=False,
         tcp_verbose=False,
+        link_verbose=False,
     ):
         self.current_time = 0
         self.events = []
@@ -30,6 +31,7 @@ class NetworkEventScheduler:
         self.routing_verbose = routing_verbose
         self.nat_verbose = nat_verbose
         self.tcp_verbose = tcp_verbose
+        self.link_verbose = link_verbose
         self.graph = nx.Graph()
 
         self.seed = seed

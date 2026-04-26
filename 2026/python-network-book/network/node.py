@@ -707,8 +707,8 @@ class Node:
     def on_arp_reply_received(self, destination_ip, destination_mac):
         if destination_ip in self.waiting_for_arp_reply:
             for packet_info in self.waiting_for_arp_reply[destination_ip]:
-                data, protocol, kwargs = packet_info
-                self.send_packet(destination_ip, data, protocol=protocol, **kwargs)
+                data, protocol, dscp, kwargs = packet_info
+                self.send_packet(destination_ip, data, protocol=protocol, dscp=dscp, **kwargs)
             del self.waiting_for_arp_reply[destination_ip]
 
     def send_arp_request(self, ip_address):
@@ -739,17 +739,17 @@ class Node:
         )
         self._send_packet(arp_reply_packet)
 
-    def send_packet(self, destination_ip, data, protocol="UDP", dscp, **kwargs):
+    def send_packet(self, destination_ip, data, protocol="UDP", dscp=0, **kwargs):
         destination_mac = self.get_mac_address_from_ip(destination_ip)
 
         if destination_mac is None:
             self.send_arp_request(destination_ip)
             if destination_ip not in self.waiting_for_arp_reply:
                 self.waiting_for_arp_reply[destination_ip] = []
-            self.waiting_for_arp_reply[destination_ip].append((data, protocol, kwargs))
+            self.waiting_for_arp_reply[destination_ip].append((data, protocol, dscp, kwargs))
         else:
             if protocol == "UDP":
-                self._send_packet_data(destination_ip, destination_mac, data, **kwargs)
+                self._send_udp_packet(destination_ip, destination_mac, data, dscp, **kwargs)
             elif protocol == "TCP":
                 if not self.is_tcp_connection_established(
                     destination_ip, kwargs.get("destination_port")
