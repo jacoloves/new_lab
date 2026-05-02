@@ -6,3 +6,4 @@ from .packet import Packet
 from .switch import Switch
 from .router import Router
 from .server import DNSServer, DHCPServer
+from .application import ApplicationManager
