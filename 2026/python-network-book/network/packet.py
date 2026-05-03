@@ -57,7 +57,7 @@ class Packet:
             return 3
         elif dscp >= 16:
             return 2
-        elif dscp > 8:
+        elif dscp >= 8:
             return 1
         else:
             return 0
@@ -71,7 +71,7 @@ class Packet:
 
     def __str__(self):
         source_mac = self.mac_header.get("source_mac", "不明")
-        destination_mac= self.mac_header.get("destination_mac", "不明")
+        destination_mac = self.mac_header.get("destination_mac", "不明")
         return f"パケット(送信元MAC: {self.header['source_mac']}, 宛先MAC: {self.header['destination_mac']}, 送信元IP: {self.header['source_ip']}, 宛先IP: {self.header['destination_ip']}, TTL: {self.header['ttl']}, フラグメントフラグ: {self.header['fragment_flags']}, フラグメントオフセット: {self.header['fragment_offset']}, ペイロード: {self.payload})"
 
 class TCPPacket(Packet):
@@ -144,8 +144,8 @@ class ARPPacket(Packet):
             "destination_ip": destination_ip,
         }
 
-        def __str__(self):
-            return f"ARPPacket(送信元MAC: {self.mac_header['source_mac']}, 宛先MAC: {self.mac_header['destination_mac']}, 操作: {self.payload['operation']})"
+    def __str__(self):
+        return f"ARPPacket(送信元MAC: {self.mac_header['source_mac']}, 宛先MAC: {self.mac_header['destination_mac']}, 操作: {self.payload['operation']})"
 
 
 class DNSPacket(Packet):

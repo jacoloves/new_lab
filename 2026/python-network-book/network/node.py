@@ -119,6 +119,18 @@ class Node:
                 ):
                     self.application_layer.register_ftp_client(application_instance)
 
+            elif class_name == "HTTPServer":
+                if self.application_layer and hasattr(
+                    self.application_layer, "register_http_server"
+                ):
+                    self.application_layer.register_http_server(application_instance)
+
+            elif class_name == "HTTPClient":
+                if self.application_layer and hasattr(
+                    self.application_layer, "register_http_client"
+                ):
+                    self.application_layer.register_http_client(application_instance)
+
     def select_available_port(self):
         for port in range(1024, 49152):
             if port not in self.used_ports:
@@ -196,7 +208,7 @@ class Node:
 
                 if isinstance(packet, DNSPacket):
                     if self.application_layer and hasattr(
-                        self.application_layer, "on_dhcp_packet_received"
+                        self.application_layer, "on_dns_packet_received"
                     ):
                         self.application_layer.on_dns_packet_received(packet)
                     return
@@ -204,7 +216,7 @@ class Node:
                 if self.application_layer and hasattr(
                     self.application_layer, "on_packet_received"
                 ):
-                    self.application_layer.on_dhcp_packet_received(packet)
+                    self.application_layer.on_packet_received(packet)
                 else:
                     self.process_data_packet(packet)
             else:
@@ -357,18 +369,16 @@ class Node:
             )
             print(f"[DEBUG] cwnd={conn_info['cwnd']}, ssthresh={conn_info['ssthresh']}")
 
-        if connection_key in self.windows:
+        if connection_key in self.windows and self.network_event_scheduler.tcp_verbose:
             unacked_seqs = sorted(self.windows[connection_key].keys())
             print(f"[DEBUG] Unacked packets for {connection_key}: {unacked_seqs}")
 
         self.remove_acked_packets_from_window(connection_key, ack_number)
 
         transfer_info = conn_info.get("transfer_info", None)
-        print(f"[DEBUG] Transfer info: {transfer_info}")
         if transfer_info and transfer_info["file_size"] > 0:
             seq_base = conn_info["sequence_number_base"]
             bytes_acked = ack_number - seq_base
-            print(f"[DEBUG] Bytes acked: {bytes_acked}")
             if bytes_acked > transfer_info["bytes_transferred"]:
                 transfer_info["bytes_transferred"] = bytes_acked
                 transfer_info["progress"].append(
@@ -417,8 +427,10 @@ class Node:
             self.schedule_send_next_chunk(connection_key)
 
     def schedule_send_next_chunk(self, connection_key):
+        delay = 0.000001
+        event_time = self.network_event_scheduler.current_time + delay
         self.network_event_scheduler.schedule_event(
-            self.network_event_scheduler.current_time,
+            event_time,
             self.send_next_chunk_event,
             connection_key,
         )
@@ -444,7 +456,9 @@ class Node:
         event_id = self.network_event_scheduler.schedule_event(
             event_time, self.handle_timeout, connection_key, sequence_number
         )
-        self.tcp_connections[connection_key]["timeout_event_ids"][sequence_number] = event_id
+        self.tcp_connections[connection_key]["timeout_event_ids"][sequence_number] = (
+            event_id
+        )
 
     def handle_timeout(self, connection_key, sequence_number):
         if (
@@ -574,9 +588,7 @@ class Node:
         for seq, packet_info in list(self.windows[connection_key].items()):
             if packet_info["expected_ack_number"] <= ack_number:
                 self.cancel_timeout(connection_key, seq)
-                self.cancel_retransmission_event(
-                    connection_key, seq
-                )
+                self.cancel_retransmission_event(connection_key, seq)
                 del self.windows[connection_key][seq]
 
     def fast_retransmit(self, connection_key):
@@ -592,7 +604,7 @@ class Node:
             self.transition_to_state(connection_key, "congestion_avoidance")
 
     def schedule_retransmission(self, connection_key):
-        sequence = self.find_retransmit_sequence_number(connection_key)
+        sequence_number = self.find_retransmit_sequence_number(connection_key)
         if sequence_number is not None:
             event_time = (
                 self.network_event_scheduler.current_time + self.timeout_interval / 2
@@ -600,11 +612,11 @@ class Node:
             event_id = self.network_event_scheduler.schedule_event(
                 event_time, self.retransmit_packet, connection_key, sequence_number
             )
-            self.tcp_connections[connection_key] ["retransmission_event_ids"][
+            self.tcp_connections[connection_key]["retransmission_event_ids"][
                 sequence_number
             ] = event_id
         else:
-            if self.network_event_scheduler.tcp_connections:
+            if self.network_event_scheduler.tcp_verbose:
                 print(f"No packets to retransmit for connection {connection_key}")
 
     def log_congestion_window(self, connection_key, cwnd, state):
@@ -617,7 +629,7 @@ class Node:
         self.network_event_scheduler.log_cwnd_event(log_entry)
         if self.network_event_scheduler.tcp_verbose:
             print(f"Logged cwnd event: {log_entry}")
-            
+
     def adjust_congestion_window(self, connection_key):
         if connection_key not in self.tcp_connections:
             return
@@ -760,7 +772,7 @@ class Node:
         else:
             initial_seq = randint(1, 10000)
             self.initialize_connection_info(
-                connection_key, 
+                connection_key,
                 state="ESTABLISHED",
                 sequence_number=initial_seq,
                 acknowledgment_number=sequence_number + 1,
@@ -779,6 +791,7 @@ class Node:
                 "bytes_transferred": 0,
                 "progress": [],
                 "file_size": 0,
+                "transfer_done": False,
             }
 
         if self.application_layer and hasattr(
@@ -919,7 +932,7 @@ class Node:
                 self.port_mapping[connection_key] = fixed_port
             return fixed_port
 
-        if app_type == 'FTPSERVER':
+        if app_type == "FTPSERVER":
             if 21 not in self.used_ports:
                 self.used_ports.add(21)
             self.port_mapping[connection_key] = 21
@@ -992,9 +1005,6 @@ class Node:
                     )
                 return
 
-            print("###################################")
-            print(connection_key, transfer_info)
-            print("###################################")
 
             app_type = self.application_layer.connection_app_map.get(
                 connection_key, None
@@ -1034,7 +1044,7 @@ class Node:
                     self.waiting_for_arp_reply[dst_ip] = []
                 self.waiting_for_arp_reply[dst_ip].append(
                     (
-                        data, 
+                        data,
                         protocol,
                         0,
                         {
@@ -1173,7 +1183,7 @@ class Node:
                 data=b"",
             )
 
-        destination_mac = self.get_mac_address_from_ip(dst_ip) 
+        destination_mac = self.get_mac_address_from_ip(dst_ip)
         if destination_mac is None:
             self.send_arp_request(dst_ip)
             if dst_ip not in self.waiting_for_arp_reply:

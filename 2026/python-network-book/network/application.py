@@ -1,5 +1,4 @@
 import random
-
 from .packet import DNSPacket, DHCPPacket, TCPPacket, UDPPacket
 
 
@@ -12,6 +11,8 @@ class ApplicationManager:
 
         self.ftp_client = None
         self.ftp_server = None
+        self.http_client = None
+        self.http_server = None
         self.udp_app = None
 
         self.connection_app_map = {}
@@ -21,6 +22,12 @@ class ApplicationManager:
 
     def register_ftp_server(self, ftp_server):
         self.ftp_server = ftp_server
+
+    def register_http_client(self, http_client):
+        self.http_client = http_client
+
+    def register_http_server(self, http_server):
+        self.http_server = http_server
 
     def register_udp_app(self, udp_app):
         self.udp_app = udp_app
@@ -56,8 +63,18 @@ class ApplicationManager:
             self.ftp_client.on_packet_received(packet)
         elif app_type == "FTPSERVER" and self.ftp_server:
             self.ftp_server.on_packet_received(packet)
-        elif app_type == None and self.ftp_server:
-            self.ftp_server.on_packet_received(packet)
+        elif app_type == "HTTP" and self.http_client:
+            self.http_client.on_packet_received(packet)
+        elif app_type == "HTTPSERVER" and self.http_server:
+            self.http_server.on_packet_received(packet)
+        elif app_type == None and (self.ftp_server or self.http_server):
+            if packet.header.get("destination_port") == 80 and self.http_server:
+                self.connection_app_map[
+                    (packet.header.get("source_ip"), packet.header.get("source_port"))
+                ] = "HTTPSERVER"
+                self.http_server.on_packet_received(packet)
+            elif self.ftp_server:
+                self.ftp_server.on_packet_received(packet)
         elif app_type == "UDP" and self.udp_app:
             self.udp_app.on_packet_received(packet)
         else:
@@ -65,14 +82,22 @@ class ApplicationManager:
 
     def on_connection_established(self, connection_key):
         app_type = self.connection_app_map.get((connection_key[0], connection_key[1]))
-        print("on_connection_established", connection_key, app_type)
         if app_type == "FTP" and self.ftp_client:
             self.ftp_client.on_connection_established(connection_key)
         elif app_type == "FTPSERVER" and self.ftp_server:
             self.ftp_server.on_connection_established(connection_key)
-        elif app_type == None and self.ftp_server:
-            self.connection_app_map[connection_key] = "FTPSERVER"
-            self.ftp_server.on_connection_established(connection_key)
+        elif app_type == "HTTP" and self.http_client:
+            self.http_client.on_connection_established(connection_key)
+        elif app_type == "HTTPSERVER" and self.http_server:
+            self.http_server.on_connection_established(connection_key)
+        elif app_type == None:
+            server_port = self.node.port_mapping.get(connection_key)
+            if server_port == 80 and self.http_server:
+                self.connection_app_map[connection_key] = "HTTPSERVER"
+                self.http_server.on_connection_established(connection_key)
+            elif self.ftp_server:
+                self.connection_app_map[connection_key] = "FTPSERVER"
+                self.ftp_server.on_connection_established(connection_key)
 
     def get_traffic_info(self, connection_key):
         conn = self.node.tcp_connections.get(connection_key)
@@ -92,19 +117,10 @@ class ApplicationManager:
         key = (connection_key[0], connection_key[1])
         app_type = self.connection_app_map.get(key)
 
-        print(
-            f"[DEBUG update_data_after_send] connection_key={connection_key}, app_type={app_type}"
-        )
-
         if app_type == "FTPSERVER" and self.ftp_server:
             transfer_info = self.node.tcp_connections.get(connection_key, {}).get(
                 "transfer_info", {}
             )
-
-            print(
-                f"[DEBUG update_data_after_send] transfer_info for {connection_key}: {app_type}"
-            )
-
             if transfer_info.get("file_size", 0) > 0 and not transfer_info.get(
                 "transfer_done", False
             ):
@@ -114,23 +130,13 @@ class ApplicationManager:
                 self.ftp_server.check_transfer_complete(
                     connection_key, client_ip, client_port, server_port
                 )
-            else:
-                pass
 
         elif app_type == "FTP" and self.ftp_client:
             transfer_info = self.node.tcp_connections.get(connection_key, {}).get(
                 "transfer_info", {}
             )
-            print(
-                f"[DEBUG update_data_after_send] transfer_info for {connection_key}: {transfer_info}"
-            )
-
             if transfer_info.get("file_size", 0) > 0:
                 self.ftp_client.update_data_after_send(connection_key, sent_bytes)
-        else:
-            print(
-                "[DEBUG update_data_after_send] No FTP client/server associated with this connection_key."
-            )
 
     def resolve_destination_url(self, destination_url, callback=None):
         if self.node.is_valid_cidr_notation(destination_url):
@@ -192,6 +198,7 @@ class DnsClient:
 
     def check_pending_queries(self):
         pass
+
 
 class DhcpClient:
     def __init__(self, node):
@@ -280,7 +287,7 @@ class DhcpClient:
 
     def send_dhcp_request(self, requested_ip):
         print(f"Node {self.node.node_id} sending DHCP REQUEST for IP {requested_ip}")
-        
+
         dhcp_request_packet = DHCPPacket(
             source_mac=self.node.mac_address,
             destination_mac="FF:FF:FF:FF:FF:FF",
@@ -342,7 +349,7 @@ class UDPApp:
         self.header_size = header_size
         self.payload_size = payload_size
         self.burstiness = burstiness
-        self.dscp  = dscp
+        self.dscp = dscp
         self.end_time = self.node.network_event_scheduler.current_time + duration
 
         self.source_port = self.node.select_random_port()
@@ -400,9 +407,7 @@ class UDPApp:
 class FTPClient:
     def __init__(self, node, verbose=False):
         self.node = node
-        self.app_manager = (
-            node.application_layer
-        )
+        self.app_manager = node.application_layer
         self.verbose = verbose
         self.state = "NOT_CONNECTED"
         self.file_to_retrieve = None
@@ -415,7 +420,7 @@ class FTPClient:
             self.server_url = server_url
             if self.verbose:
                 print("[FTPClient] サーバURLからIPを解決しています:", server_url)
-            
+
             def on_resolved(ip):
                 if ip:
                     if self.verbose:
@@ -442,17 +447,11 @@ class FTPClient:
         self.server_ip = server_ip
         self.server_port = server_port
         self.state = "CONNECTING"
-        self.node.initiate_tcp_handshake(
-            server_ip, server_port
-        )
-        self.app_manager.map_connection_to_app(
-            (server_ip, server_port), "FTP"
-        )
+        self.node.initiate_tcp_handshake(server_ip, server_port)
+        self.app_manager.map_connection_to_app((server_ip, server_port), "FTP")
 
     def on_packet_received(self, packet):
-        data = packet.payload.decode(
-            "utf-8", errors="ignore"
-        )
+        data = packet.payload.decode("utf-8", errors="ignore")
         if self.verbose:
             print("[FTPClient] 受信データ:", data.strip())
 
@@ -589,7 +588,7 @@ class FTPServer:
                     "payload_size": 1460,
                     "bytes_transferred": 0,
                     "progress": [],
-                    "file_size":file_size,
+                    "file_size": file_size,
                     "transfer_done": False,
                 }
 
@@ -684,3 +683,158 @@ class FTPServer:
 
     def get_traffic_info(self, connection_key):
         return self.node.tcp_connections[connection_key].get("transfer_info", None)
+
+
+class HTTPClient:
+    def __init__(self, node, server_url=None, verbose=False):
+        self.node = node
+        self.app_manager = node.application_layer
+        self.server_url = server_url
+        self.verbose = verbose
+        self.state = "NOT_CONNECTED"
+        self.file_to_retrieve = None
+        self.response_data = {}
+
+    def connect(self, server_ip=None, server_url=None, server_port=80):
+        if server_ip:
+            self._initiate_connection(server_ip, server_port)
+        elif server_url:
+            self.server_url = server_url
+            if self.verbose:
+                print("[HTTPClient] サーバURLからIPを解決しています:", server_url)
+
+            def on_resolved(ip):
+                if ip:
+                    if self.verbose:
+                        print("[HTTPClient] 解決されたIP:", ip)
+                    self._initiate_connection(ip, server_port)
+                else:
+                    if self.verbose:
+                        print("[HTTPClient] サーバURLの解決に失敗しました:", server_url)
+
+            resolved_ip = self.app_manager.resolve_destination_url(
+                server_url, callback=on_resolved
+            )
+            if resolved_ip is not None:
+                on_resolved(resolved_ip)
+        else:
+            if self.verbose:
+                print(
+                    "[HTTPClient] 接続情報が不足しています。server_ipまたはserver_urlを指定してください。"
+                )
+
+    def _initiate_connection(self, server_ip, server_port):
+        if self.verbose:
+            print("[HTTPClient] TCP接続を要求しています:", server_ip, server_port)
+        self.server_ip = server_ip
+        self.server_port = server_port
+        self.state = "CONNECTING"
+        self.node.initiate_tcp_handshake(server_ip, server_port)
+        self.app_manager.map_connection_to_app((server_ip, server_port), "HTTP")
+
+    def get_file(self, filename):
+        self.file_to_retrieve = filename
+        if self.state == "CONNECTED":
+            self.send_http_request(f"GET /{filename} HTTP/1.0\r\n\r\n")
+        elif self.verbose:
+            print("[HTTPClient] 接続後にファイルを取得します:", filename)
+
+    def send_http_request(self, request):
+        if self.verbose:
+            print("[HTTPClient] 送信リクエスト:", request.strip())
+        self.node.send_app_data(
+            self.server_ip,
+            request.encode("utf-8"),
+            protocol="TCP",
+            destination_port=self.server_port,
+        )
+
+    def on_connection_established(self, connection_key):
+        self.state = "CONNECTED"
+        if self.verbose:
+            print("[HTTPClient] 接続が確立しました。")
+        if self.file_to_retrieve:
+            self.get_file(self.file_to_retrieve)
+
+    def on_packet_received(self, packet):
+        data = packet.payload.decode("utf-8", errors="ignore")
+        if self.verbose:
+            print("[HTTPClient] 受信データ:", data.strip())
+
+        if data.startswith("HTTP/1.0 200 OK"):
+            if self.verbose:
+                print("[HTTPClient] ファイルの取得に成功しました")
+        elif data.startswith("HTTP/1.0 404"):
+            if self.verbose:
+                print("[HTTPClient] ファイルが見つかりませんでした")
+
+
+class HTTPServer:
+    def __init__(self, node, shared_files, verbose=False):
+        self.node = node
+        self.app_manager = node.application_layer
+        self.shared_files = shared_files
+        self.verbose = verbose
+        self.state = "READY"
+
+    def on_connection_established(self, connection_key):
+        if self.verbose:
+            print("[HTTPServer] Connection established.")
+        self.state = "READY"
+
+    def on_packet_received(self, packet):
+        data = packet.payload.decode("utf-8", errors="ignore")
+        if self.verbose:
+            print("[HTTPServer] Received:", data.strip())
+
+        client_ip = packet.header["source_ip"]
+        client_port = packet.header["source_port"]
+        server_port = packet.header["destination_port"]
+
+        if data.startswith("GET"):
+            parts = data.split(" ")
+            if len(parts) < 2:
+                self.send_http_response(
+                    client_ip,
+                    client_port,
+                    server_port,
+                    "HTTP/1.0 400 Bad Request\r\n\r\n",
+                )
+                return
+
+            filename = parts[1].lstrip("/").split()[0]
+            file_data = self.shared_files.get(filename, None)
+
+            if file_data is None:
+                self.send_http_response(
+                    client_ip,
+                    client_port,
+                    server_port,
+                    "HTTP/1.0 404 Not Found\r\n\r\n",
+                )
+                return
+
+            response = f"HTTP/1.0 200 OK\r\nContent-Length: {len(file_data)}\r\n\r\n"
+            response = response.encode("utf-8") + file_data
+
+            if self.verbose:
+                print(f"[HTTPServer] Sending file {filename} ({len(file_data)} bytes)")
+
+            self.node.send_app_data(
+                client_ip,
+                response,
+                protocol="TCP",
+                source_port=server_port,
+                destination_port=client_port,
+            )
+
+    def send_http_response(self, client_ip, client_port, server_port, response):
+        if self.verbose:
+            print("[HTTPServer] Sending response:", response.strip())
+        self.node.send_app_data(
+            client_ip,
+            response.encode("utf-8"),
+            protocol="TCP",
+            source_port=server_port,
+            destination_port=client_port,
+        )
