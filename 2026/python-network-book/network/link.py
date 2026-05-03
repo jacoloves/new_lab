@@ -15,20 +15,21 @@ class Link:
         self.bandwidth = bandwidth
         self.delay = delay
         self.loss_rate = loss_rate
+        self.dropped_packets = 0  # パケットロスのカウント用
+        self.total_packets = 0  # 総パケット数のカウント用
         self.is_active = True
         self.network_event_scheduler = network_event_scheduler
         self.local_seed = self.network_event_scheduler.get_seed()
         if self.local_seed is not None:
             random.seed(self.local_seed)
 
+        # 優先度付きキューの初期化
         self.priority_queues_xy = defaultdict(list)
         self.priority_queues_yx = defaultdict(list)
 
+        # 転送中フラグの初期化
         self.is_transferring_xy = False
         self.is_transferring_yx = False
-
-        self.rr_index_xy = 0  # ラウンドロビンで次に読み出す優先度（0〜7）
-        self.rr_index_yx = 0
 
         # IPアドレスの選択とリンクの設定
         ip_x, ip_y = self.setup_link_ips(node_x, node_y)
@@ -82,9 +83,6 @@ class Link:
     def is_compatible(self, ip_cidr_x, ip_cidr_y):
         """
         二つのIPアドレス（CIDR表記）が同じネットワークに属しているかどうかを判断する。
-        :param ip_cidr_x: ノードXのIPアドレス（CIDR表記）
-        :param ip_cidr_y: ノードYのIPアドレス（CIDR表記）
-        :return: 同じネットワークに属している場合はTrue、そうでない場合はFalse
         """
         ip_address_x, subnet_mask_x = ip_cidr_x.split("/")
         ip_address_y, subnet_mask_y = ip_cidr_y.split("/")
@@ -103,10 +101,6 @@ class Link:
     def get_network_address(self, ip_address, subnet_mask):
         """
         IPアドレスとサブネットマスクからネットワークアドレスを計算する。
-
-        :param ip_address: 計算するIPアドレス
-        :param subnet_mask: 使用するサブネットマスク
-        :return: ネットワークアドレス
         """
         # IPアドレスとサブネットマスクをビット演算できるように整数に変換
         ip_addr_int = self.ip_to_int(ip_address)
@@ -118,9 +112,6 @@ class Link:
     def ip_to_int(self, ip_address):
         """
         IPアドレスを整数に変換する。
-
-        :param ip_address: 変換するIPアドレス
-        :return: 対応する整数
         """
         octets = ip_address.split(".")
         return sum(int(octet) << (8 * i) for i, octet in enumerate(reversed(octets)))
@@ -128,8 +119,6 @@ class Link:
     def subnet_mask_to_int(self, subnet_mask):
         """
         サブネットマスク（CIDR表記）を整数に変換する。
-        :param subnet_mask: サブネットマスク（例: "24"）
-        :return: 対応する整数
         """
         return (0xFFFFFFFF >> (32 - int(subnet_mask))) << (32 - int(subnet_mask))
 
@@ -142,6 +131,7 @@ class Link:
             queue = self.priority_queues_yx[priority]
             is_transferring = self.is_transferring_yx
 
+        # 現在の時刻を使用してキューにパケットを追加
         dequeue_time = self.network_event_scheduler.current_time
         heapq.heappush(queue, (dequeue_time, packet, from_node))
 
@@ -150,6 +140,7 @@ class Link:
                 f"{self.network_event_scheduler.current_time}, enqueue packet {packet.size} bytes, priority: {priority}"
             )
 
+        # キューが1になった場合、最初の transfer_packet をスケジュール
         if len(queue) == 1 and not is_transferring:
             self.network_event_scheduler.schedule_event(
                 self.network_event_scheduler.current_time,
@@ -158,94 +149,95 @@ class Link:
             )
 
     def transfer_packet(self, from_node):
-        is_xy = from_node == self.node_x
-        if is_xy:
+        if from_node == self.node_x:
             priority_queues = self.priority_queues_xy
             self.is_transferring_xy = True
-            rr_index = self.rr_index_xy
         else:
             priority_queues = self.priority_queues_yx
             self.is_transferring_yx = True
-            rr_index = self.rr_index_yx
 
-        # パケットが存在する優先度キューの一覧（昇順）
-        active_priorities = sorted(p for p, q in priority_queues.items() if q)
+        # 最高優先度の非空キューを見つける
+        for priority in sorted(priority_queues.keys(), reverse=True):
+            queue = priority_queues[priority]
+            if queue:
+                dequeue_time, packet, _ = heapq.heappop(queue)
+                packet_transfer_time = (packet.size * 8) / self.bandwidth  # 秒単位
+                if self.network_event_scheduler.link_verbose:
+                    print(
+                        f"{self.network_event_scheduler.current_time:.6f}: Packet transferred from Link {self.node_x.node_id}-{self.node_y.node_id} to {from_node.node_id}. Packet size: {packet.size} bytes, Priority: {packet.get_priority()}"
+                    )
 
-        if not active_priorities:
-            if is_xy:
-                self.is_transferring_xy = False
-            else:
-                self.is_transferring_yx = False
-            return
+                self.total_packets += 1
+                if self.should_drop_packet(packet):
+                    self.dropped_packets += 1
+                    if self.network_event_scheduler.link_verbose:
+                        print(
+                            f"{self.network_event_scheduler.current_time:.6f}: Packet dropped at Link {self.node_x.node_id}-{self.node_y.node_id}. "
+                            f"Total drops: {self.dropped_packets}/{self.total_packets} "
+                            f"({self.dropped_packets / self.total_packets * 100:.2f}%)"
+                        )
+                    packet.set_arrived(-1)
+                else:
+                    next_node = self.node_x if from_node != self.node_x else self.node_y
 
-        # ラウンドロビン: rr_index以上の優先度から選び、なければ先頭に戻る
-        next_priority = next(
-            (p for p in active_priorities if p >= rr_index),
-            active_priorities[0],
-        )
+                    # 遅延計算（伝搬遅延 + 送信遅延）
+                    total_delay = self.delay + packet_transfer_time
 
-        dequeue_time, packet, _ = heapq.heappop(priority_queues[next_priority])
-        packet_transfer_time = (packet.size * 8) / self.bandwidth
+                    if getattr(packet, "send_time", None) is None and not isinstance(
+                        from_node, (Switch, Router)
+                    ):
+                        packet.send_time = self.network_event_scheduler.current_time
+                    self.network_event_scheduler.log_packet_info(
+                        packet, "sent", from_node.node_id
+                    )
 
-        # 次回は今回の優先度の次から読み出す（0〜7でループ）
-        new_rr_index = (next_priority + 1) % 8
-        if is_xy:
-            self.rr_index_xy = new_rr_index
+                    self.network_event_scheduler.schedule_event(
+                        self.network_event_scheduler.current_time + total_delay,
+                        next_node.receive_packet,
+                        packet,
+                        self,
+                    )
+
+                # 現在のパケットの転送時間後に次のパケット送信をスケジュール
+                if self.network_event_scheduler.link_verbose:
+                    print(
+                        f"{self.network_event_scheduler.current_time:.6f}, packet_transfer_time: {packet_transfer_time}"
+                    )
+                if any(priority_queues.values()):
+                    self.network_event_scheduler.schedule_event(
+                        self.network_event_scheduler.current_time
+                        + packet_transfer_time,
+                        self.transfer_packet,
+                        from_node,
+                    )
+                    if self.network_event_scheduler.link_verbose:
+                        print(
+                            f"{self.network_event_scheduler.current_time:.6f}: Schedule next packet transfer after {packet_transfer_time} seconds"
+                        )
+                else:
+                    if from_node == self.node_x:
+                        self.is_transferring_xy = False
+                    else:
+                        self.is_transferring_yx = False
+
+                break  # 一度に一つのパケットのみ処理
         else:
-            self.rr_index_yx = new_rr_index
-
-        if self.network_event_scheduler.link_verbose:
-            print(
-                f"{self.network_event_scheduler.current_time:.6f}: Packet transferred from Link {self.node_x.node_id}-{self.node_y.node_id} to {from_node.node_id}. Packet size: {packet.size} bytes, Priority: {next_priority}"
-            )
-
-        if self.should_drop_packet(packet):
-            if self.network_event_scheduler.link_verbose:
-                print(
-                    f"{self.network_event_scheduler.current_time:.6f}: Packet dropped at Link {self.node_x.node_id}-{self.node_y.node_id}."
-                )
-            packet.set_arrived(-1)
-        else:
-            next_node = self.node_x if from_node != self.node_x else self.node_y
-            self.network_event_scheduler.schedule_event(
-                self.network_event_scheduler.current_time + self.delay,
-                next_node.receive_packet,
-                packet,
-                self,
-            )
-
-        print(
-            f"{self.network_event_scheduler.current_time:.6f}, packet_transfer_time: {packet_transfer_time}"
-        )
-        if any(priority_queues.values()):
-            self.network_event_scheduler.schedule_event(
-                self.network_event_scheduler.current_time + packet_transfer_time,
-                self.transfer_packet,
-                from_node,
-            )
-            if self.network_event_scheduler.link_verbose:
-                print(
-                    f"{self.network_event_scheduler.current_time:.6f}: Schedule next packet transfer after {packet_transfer_time} seconds"
-                )
-        else:
-            print(
-                f"{self.network_event_scheduler.current_time:.6f}, queue is empty"
-            )
-            if is_xy:
+            if from_node == self.node_x:
                 self.is_transferring_xy = False
             else:
                 self.is_transferring_yx = False
 
     def should_drop_packet(self, packet):
-        """パケットがドロップされるべきかどうかを判断するメソッド"""
-        # パケットがUDPPacketの場合、ロス率に応じてドロップする
-        if isinstance(packet, UDPPacket):
-            return random.random() < self.loss_rate
-        # パケットがTCPPacketでフラグがPSHの場合、ロス率に応じてドロップする
-        elif isinstance(packet, TCPPacket) and "PSH" in packet.header.get("flags", ""):
-            return random.random() < self.loss_rate
-        # それ以外の場合はドロップしない
-        return False
+        """パケットをドロップするかどうかを決定する"""
+        if not isinstance(packet, (TCPPacket, UDPPacket)):
+            return False
+
+        # TCPパケットの場合、PSHフラグがある場合のみドロップ対象
+        if isinstance(packet, TCPPacket):
+            if "PSH" not in packet.header.get("flags", ""):
+                return False
+
+        return random.random() < self.loss_rate
 
     def __str__(self):
         return f"リンク({self.node_x.node_id} ↔ {self.node_y.node_id}, 帯域幅: {self.bandwidth}, 遅延: {self.delay}, パケットロス率: {self.loss_rate})"

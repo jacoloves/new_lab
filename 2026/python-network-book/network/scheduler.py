@@ -33,7 +33,6 @@ class NetworkEventScheduler:
         self.tcp_verbose = tcp_verbose
         self.link_verbose = link_verbose
         self.graph = nx.Graph()
-
         self.seed = seed
         if seed is not None:
             random.seed(seed)
@@ -209,6 +208,7 @@ class NetworkEventScheduler:
                     "size": packet.size,
                     "creation_time": packet.creation_time,
                     "arrival_time": packet.arrival_time,
+                    "send_time": getattr(packet, "send_time", None),
                     "events": [],
                 }
 
@@ -339,6 +339,25 @@ class NetworkEventScheduler:
         plt.title("Congestion Window Size over Time")
         plt.show()
 
+    def plot_transfer_progress(self, node, connection_key):
+        """
+        指定されたノードとコネクションキーに対する転送進行状況をプロットします。
+        """
+        transfer_info = node.tcp_connections.get(connection_key, {}).get(
+            "transfer_info", None
+        )
+        if transfer_info and transfer_info["progress"]:
+            times, bytes_transferred = zip(*transfer_info["progress"])
+            plt.figure(figsize=(10, 6))
+            plt.plot(times, bytes_transferred, marker="o")
+            plt.title(f"Data Transfer Progress for Connection {connection_key}")
+            plt.xlabel("Time (s)")
+            plt.ylabel("Bytes Transferred")
+            plt.grid(True)
+            plt.show()
+        else:
+            print("No transfer info available or no progress recorded.")
+
     def generate_summary(self, packet_logs):
         # パケットタイプとソース宛先ペアでの集計データを保持するための辞書
         summary_data = defaultdict(
@@ -375,7 +394,11 @@ class NetworkEventScheduler:
             ):
                 data["received_packets"] += 1
                 data["received_bytes"] += log["size"]
-                data["total_delay"] += log["arrival_time"] - log["creation_time"]
+                if "send_time" in log and log["send_time"] is not None:
+                    delay = log["arrival_time"] - log["send_time"]
+                else:
+                    delay = log["arrival_time"] - log["creation_time"]
+                data["total_delay"] += delay
                 data["max_arrival_time"] = max(
                     data["max_arrival_time"], log["arrival_time"]
                 )
@@ -393,15 +416,11 @@ class NetworkEventScheduler:
                 print(f"    Total Sent Bytes: {data['sent_bytes']}")
                 print(f"    Total Received Packets: {data['received_packets']}")
                 print(f"    Total Received Bytes: {data['received_bytes']}")
-                avg_throughput = (
-                    (
-                        data["received_bytes"]
-                        * 8
-                        / (data["max_arrival_time"] - data["min_creation_time"])
-                    )
-                    if (data["max_arrival_time"] - data["min_creation_time"]) > 0
-                    else 0
-                )
+                duration = data["max_arrival_time"] - data["min_creation_time"]
+                if duration > 0:
+                    avg_throughput = data["received_bytes"] * 8 / duration
+                else:
+                    avg_throughput = 0
                 avg_delay = (
                     data["total_delay"] / data["received_packets"]
                     if data["received_packets"] > 0
@@ -463,14 +482,24 @@ class NetworkEventScheduler:
         for packet_id, log in packet_logs.items():
             if log["arrival_time"] is not None:
                 src_dst_pair = (log["source_ip"], log["destination_ip"])
-                delay = log["arrival_time"] - log["creation_time"]
+                # send_timeがあればsend_timeで遅延計算
+                if "send_time" in log and log["send_time"] is not None:
+                    delay = log["arrival_time"] - log["send_time"]
+                else:
+                    # send_timeがない場合は従来通りcreation_timeを使用
+                    delay = log["arrival_time"] - log["creation_time"]
+
                 delay_data[src_dst_pair].append(delay)
 
         num_plots = len(delay_data)
+        if num_plots == 0:
+            print("No packets with arrival_time recorded. Cannot plot delay histogram.")
+            return
+
         num_bins = 20
         fig, axs = plt.subplots(num_plots, figsize=(6, 2 * num_plots))
         max_delay = max(max(delays) for delays in delay_data.values())
-        bin_width = max_delay / num_bins
+        bin_width = max_delay / num_bins if max_delay > 0 else 1
 
         for i, (src_dst, delays) in enumerate(delay_data.items()):
             ax = axs[i] if num_plots > 1 else axs

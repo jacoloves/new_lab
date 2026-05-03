@@ -53,9 +53,9 @@ class ApplicationManager:
         )
 
         if app_type == "FTP" and self.ftp_client:
-            self.ftp_client.on_dns_packet_received(packet)
+            self.ftp_client.on_packet_received(packet)
         elif app_type == "FTPSERVER" and self.ftp_server:
-            self.ftp_server.on_dns_packet_received(packet)
+            self.ftp_server.on_packet_received(packet)
         elif app_type == None and self.ftp_server:
             self.ftp_server.on_packet_received(packet)
         elif app_type == "UDP" and self.udp_app:
@@ -264,7 +264,7 @@ class DhcpClient:
             self.node.network_event_scheduler.log_packet_info(
                 packet, "DHCP ACK received", self.node.node_id
             )
-            assigned_ip = packet.dhcp_data.gtet("assigned_ip")
+            assigned_ip = packet.dhcp_data.get("assigned_ip")
             dns_server_ip = packet.dhcp_data.get("dns_server_ip")
             if assigned_ip:
                 self.node.set_ip_address(assigned_ip)
@@ -285,11 +285,11 @@ class DhcpClient:
             source_mac=self.node.mac_address,
             destination_mac="FF:FF:FF:FF:FF:FF",
             source_ip="0.0.0.0/32",
-            destination_mac="255.255.255.255/32",
+            destination_ip="255.255.255.255/32",
             message_type="REQUEST",
             network_event_scheduler=self.node.network_event_scheduler,
         )
-        dhcp_request_packet.dhcp_data = {"requested_ip", requested_ip}
+        dhcp_request_packet.dhcp_data = {"requested_ip": requested_ip}
 
         self.node._send_packet(dhcp_request_packet)
         self.node.network_event_scheduler.log_packet_info(
@@ -317,7 +317,7 @@ class UDPApp:
     def __init__(self, node, protocol="UDP"):
         self.node = node
         self.app_manager = node.application_layer
-        self.protocol = None
+        self.protocol = protocol
         self.bitrate = None
         self.header_size = None
         self.payload_size = None
@@ -353,7 +353,7 @@ class UDPApp:
             current_time = self.node.network_event_scheduler.current_time
             delay = max(0, start_time - current_time)
             self.node.network_event_scheduler.schedule_event(
-                current_time + delay, sself.schedule_traffic
+                current_time + delay, self.schedule_traffic
             )
             self.app_manager.map_connection_to_app((ip, self.destination_port), "UDP")
 
@@ -469,8 +469,6 @@ class FTPClient:
             pass
         elif data.startswith("226"):
             pass
-        elif data.startswith("226"):
-            pass
 
     def on_connection_established(self, connection_key):
         self.set_traffic_info(connection_key)
@@ -528,7 +526,7 @@ class FTPServer:
         self.state = "READY"
         self.outgoing_data = {}
 
-    def on_connection_established(self, connection_key);
+    def on_connection_established(self, connection_key):
         self.set_traffic_info(connection_key)
         client_ip, client_port = connection_key
         server_port = 21

@@ -13,6 +13,7 @@ class Server:
         self.links = []
 
     def generate_mac_address(self):
+        # ランダムなMACアドレスを生成
         return ":".join(
             [
                 "{:02x}".format(uuid.uuid4().int >> elements & 0xFF)
@@ -29,27 +30,36 @@ class Server:
 
     def receive_packet(self, packet, received_link):
         if packet.arrival_time == -1:
+            # パケットロスをログに記録
             self.network_event_scheduler.log_packet_info(packet, "lost", self.node_id)
             return
 
+        # 宛先MACアドレスがブロードキャストアドレスまたは自身のMACアドレスの場合の処理
         if (
             packet.header["destination_mac"] == "FF:FF:FF:FF:FF:FF"
             or packet.header["destination_mac"] == self.mac_address
         ):
             if isinstance(packet, ARPPacket):
+                # ARPパケット処理
                 if (
                     packet.payload.get("operation") == "request"
                     and packet.payload["destination_ip"] == self.ip_address
                 ):
+                    # ARPリクエストの処理
                     self._send_arp_reply(packet)
 
     def _send_arp_reply(self, request_packet):
+        # ARPリプライパケットを作成
         arp_reply_packet = ARPPacket(
-            source_mac=self.mac_address,
-            destination_mac=request_packet.header["source_mac"],
-            source_ip=self.ip_address,
-            destination_ip=request_packet.header["source_ip"],
-            operation="reply",
+            source_mac=self.mac_address,  # 送信元MACアドレスは自身のMACアドレス
+            destination_mac=request_packet.header[
+                "source_mac"
+            ],  # 宛先MACアドレスはARPリクエストの送信元MACアドレス
+            source_ip=self.ip_address,  # 送信元IPアドレスは自身のIPアドレス
+            destination_ip=request_packet.header[
+                "source_ip"
+            ],  # 宛先IPアドレスはARPリクエストの送信元IPアドレス
+            operation="reply",  # 操作は'reply'
             network_event_scheduler=self.network_event_scheduler,
         )
         self.network_event_scheduler.log_packet_info(
@@ -65,15 +75,16 @@ class Server:
 class DNSServer(Server):
     def __init__(self, node_id, ip_address, network_event_scheduler, mac_address=None):
         super().__init__(node_id, ip_address, network_event_scheduler, mac_address)
-        self.dns_records = {}
+        self.dns_records = {}  # ドメイン名をキーにしてIPアドレスを取得するための辞書
         label = f"DNSServer {node_id}"
         self.network_event_scheduler.add_node(node_id, label, ip_addresses=[ip_address])
 
     def add_dns_record(self, domain_name, ip_address):
+        # 新しいDNSレコードを追加するメソッド
         self.dns_records[domain_name] = ip_address
 
     def receive_packet(self, packet, received_link):
-        super().receive_packet(packet, received_link)
+        super().receive_packet(packet, received_link)  # Serverクラスの共通処理を利用
 
         if (
             packet.header["destination_mac"] == "FF:FF:FF:FF:FF:FF"
@@ -88,6 +99,7 @@ class DNSServer(Server):
                 )
                 packet.set_arrived(self.network_event_scheduler.current_time)
 
+                # DNSパケット処理
                 self.network_event_scheduler.log_packet_info(
                     packet, "DNS query received", self.node_id
                 )
@@ -98,26 +110,32 @@ class DNSServer(Server):
                 self._send_packet(dns_response_packet)
 
             else:
+                # 宛先IPがこのノードではない場合の処理
                 self.network_event_scheduler.log_packet_info(
                     packet, "dropped", self.node_id
                 )
 
     def handle_dns_query(self, dns_packet):
+        # DNSクエリを処理してレスポンスを返すメソッド
         query_domain = dns_packet.query_domain
         if query_domain in self.dns_records:
+            # クエリされたドメインがDNSレコードに存在する場合、対応するIPアドレスを取得
             resolved_ip = self.dns_records[query_domain]
+            # DNSレスポンスパケットを生成して返す
             dns_response_packet = DNSPacket(
                 source_mac=self.mac_address,
                 destination_mac=dns_packet.header["source_mac"],
                 source_ip=self.ip_address,
                 destination_ip=dns_packet.header["source_ip"],
                 query_domain=query_domain,
-                query_type="A",
+                query_type="A",  # クエリタイプは"A"（IPv4アドレス）
                 network_event_scheduler=self.network_event_scheduler,
             )
+            # DNSレスポンスに解決されたIPアドレスを含める
             dns_response_packet.dns_data = {"resolved_ip": resolved_ip}
             return dns_response_packet
         else:
+            # クエリされたドメインがDNSレコードに存在しない場合はNoneを返す
             return None
 
 
@@ -133,7 +151,7 @@ class DHCPServer(Server):
     ):
         super().__init__(node_id, ip_address, network_event_scheduler, mac_address)
         self.ip_pool = self.initialize_ip_pool(start_cidr)
-        self.used_ips = set()
+        self.used_ips = set()  # 使用中のIPアドレスを追跡するセット
         self.dns_server_ip = dns_server_ip
         label = f"DHCPServer {node_id}"
         self.network_event_scheduler.add_node(node_id, label, ip_addresses=[ip_address])
@@ -148,6 +166,7 @@ class DHCPServer(Server):
             if ip not in self.used_ips:
                 self.used_ips.add(ip)
                 return ip
+        # 利用可能なIPアドレスがない場合はNoneを返す
         return None
 
     def mark_ips_as_used(self, ips):
@@ -155,23 +174,31 @@ class DHCPServer(Server):
             self.used_ips.add(ip)
 
     def receive_packet(self, packet, received_link):
+        # For DHCP packets, we need to accept broadcast packets
+        if isinstance(packet, DHCPPacket):
+            self.network_event_scheduler.log_packet_info(
+                packet, "DHCP packet received", self.node_id
+            )
+            packet.set_arrived(self.network_event_scheduler.current_time)
+
+            if packet.message_type == "DISCOVER":
+                self.handle_dhcp_discover(packet)
+            elif packet.message_type == "REQUEST":
+                self.handle_dhcp_request(packet)
+            return
+
+        # For non-DHCP packets, use normal server packet handling
         super().receive_packet(packet, received_link)
 
-        if (
-            packet.header["destination_mac"] == "FF:FF:FF:FF:FF:FF"
-            and packet.header["destination_ip"] == "255.255.255.255/32"
-        ):
-            if isinstance(packet, DHCPPacket):
-                if packet.message_type == "DISCOVER":
-                    self.handle_dhcp_discover(packet)
-                elif packet.message_type == "REQUEST":
-                    self.handle_dhcp_request(packet)
-                else:
-                    pass
-
     def handle_dhcp_discover(self, discover_packet):
+        # DHCP DISCOVERメッセージの処理
+        # 利用可能なIPアドレスを割り当て、DHCPOfferPacketを生成して送信
         if self.ip_pool:
             assigned_ip = self.get_available_ip()
+            print(
+                f"DHCP Server {self.node_id} offering IP {assigned_ip} to client {discover_packet.header['source_mac']}"
+            )
+            # DHCP Offerメッセージの送信
             offer_packet = self.create_dhcp_offer_packet(discover_packet, assigned_ip)
             self.network_event_scheduler.log_packet_info(
                 offer_packet, "DHCP Offer", self.node_id
@@ -179,22 +206,29 @@ class DHCPServer(Server):
             self._send_packet(offer_packet)
 
     def handle_dhcp_request(self, request_packet):
+        # DHCP REQUESTメッセージの処理
+        # IPアドレスの割り当てを確定し、DHCPAckPacketを生成して送信
         ack_packet = self.create_dhcp_ack_packet(request_packet)
         self._send_packet(ack_packet)
 
     def create_dhcp_offer_packet(self, discover_packet, offered_ip):
+        # DHCPOfferPacketの生成（DHCPPacketクラスを使用）
         dhcp_offer_packet = DHCPPacket(
             source_mac=self.mac_address,
             destination_mac=discover_packet.header["source_mac"],
             source_ip=self.ip_address,
-            destination_ip=offered_ip,
+            destination_ip="255.255.255.255/32",  # Use broadcast for DHCP offer
             message_type="OFFER",
             network_event_scheduler=self.network_event_scheduler,
         )
-        dhcp_offer_packet.dhcp_data = {"offered_ip": offered_ip}
+        dhcp_offer_packet.dhcp_data = {
+            "offered_ip": offered_ip,
+            "dns_server_ip": self.dns_server_ip,
+        }
         return dhcp_offer_packet
 
     def create_dhcp_ack_packet(self, request_packet):
+        # DHCPAckPacketの生成（DHCPPacketクラスを使用）
         assigned_ip = request_packet.dhcp_data["requested_ip"]
         dhcp_ack_packet = DHCPPacket(
             source_mac=self.mac_address,
@@ -205,7 +239,7 @@ class DHCPServer(Server):
             network_event_scheduler=self.network_event_scheduler,
         )
         dhcp_ack_packet.dhcp_data = {
-            "assigned_ip": assigned_ip,
-            "dns_server_ip": self.dns_server_ip,
+            "assigned_ip": assigned_ip,  # 割り当てるIPアドレス
+            "dns_server_ip": self.dns_server_ip,  # DNSサーバのIPアドレス
         }
         return dhcp_ack_packet
