@@ -1,4 +1,6 @@
 import random
+
+from network import server
 from .packet import DNSPacket, DHCPPacket, TCPPacket, UDPPacket
 
 
@@ -13,6 +15,8 @@ class ApplicationManager:
         self.ftp_server = None
         self.http_client = None
         self.http_server = None
+        self.https_client = None
+        self.https_server = None
         self.udp_app = None
 
         self.connection_app_map = {}
@@ -28,6 +32,12 @@ class ApplicationManager:
 
     def register_http_server(self, http_server):
         self.http_server = http_server
+
+    def register_https_client(self, https_client):
+        self.https_client = https_client
+
+    def register_https_server(self, https_server):
+        self.https_server = https_server
 
     def register_udp_app(self, udp_app):
         self.udp_app = udp_app
@@ -67,8 +77,17 @@ class ApplicationManager:
             self.http_client.on_packet_received(packet)
         elif app_type == "HTTPSERVER" and self.http_server:
             self.http_server.on_packet_received(packet)
-        elif app_type == None and (self.ftp_server or self.http_server):
-            if packet.header.get("destination_port") == 80 and self.http_server:
+        elif app_type == "HTTPS" and self.https_client:
+            self.https_client.on_packet_received(packet)
+        elif app_type == "HTTPSSERVER" and self.https_server:
+            self.https_server.on_packet_received(packet)
+        elif app_type == None and (self.ftp_server or self.http_server or self.https_server):
+            if packet.header.get("destination_port") == 443 and self.https_server:
+                self.connection_app_map[
+                    (packet.header.get("source_ip"), packet.header.get("source_port"))
+                ] = "HTTPSSERVER"
+                self.https_server.on_packet_received(packet)
+            elif packet.header.get("destination_port") == 80 and self.http_server:
                 self.connection_app_map[
                     (packet.header.get("source_ip"), packet.header.get("source_port"))
                 ] = "HTTPSERVER"
@@ -88,11 +107,22 @@ class ApplicationManager:
             self.ftp_server.on_connection_established(connection_key)
         elif app_type == "HTTP" and self.http_client:
             self.http_client.on_connection_established(connection_key)
+        elif app_type == "HTTPS" and self.https_client:
+            self.https_client.on_connection_established(connection_key)
         elif app_type == "HTTPSERVER" and self.http_server:
             self.http_server.on_connection_established(connection_key)
+        elif app_type == "HTTPSSERVER" and self.https_server:
+            self.https_server.on_connection_established(connection_key)
         elif app_type == None:
+            # port_mapping[(client_ip, client_port)] = server_port (サーバー側のポートを取得)
             server_port = self.node.port_mapping.get(connection_key)
-            if server_port == 80 and self.http_server:
+            if server_port == 443 and self.https_server:
+                self.connection_app_map[connection_key] = "HTTPSSERVER"
+                self.https_server.on_connection_established(connection_key)
+            elif connection_key[1] == 443 and self.https_client:
+                self.connection_app_map[connection_key] = "HTTPS"
+                self.https_client.on_connection_established(connection_key)
+            elif server_port == 80 and self.http_server:
                 self.connection_app_map[connection_key] = "HTTPSERVER"
                 self.http_server.on_connection_established(connection_key)
             elif self.ftp_server:
@@ -217,8 +247,9 @@ class DhcpClient:
         )
 
     def send_dhcp_discover(self):
+        self.retries += 1
         print(
-            f"Node {self.node.node_id} sending DHCP DISCOVER (attempt {self.retries + 1}/{self.max_retries})"
+            f"Node {self.node.node_id} sending DHCP DISCOVER (attempt {self.retries}/{self.max_retries})"
         )
 
         dhcp_discover_packet = DHCPPacket(
@@ -244,7 +275,6 @@ class DhcpClient:
 
     def retry_discover(self):
         if self.state == "DISCOVER_SENT":
-            self.retries += 1
             if self.retries < self.max_retries:
                 self.send_dhcp_discover()
             else:
@@ -814,26 +844,441 @@ class HTTPServer:
                 )
                 return
 
-            response = f"HTTP/1.0 200 OK\r\nContent-Length: {len(file_data)}\r\n\r\n"
-            response = response.encode("utf-8") + file_data
+            header = f"HTTP/1.0 200 OK\r\nContent-Length: {len(file_data)}\r\n\r\n"
+            response_bytes = header.encode("utf-8") + file_data
 
             if self.verbose:
                 print(f"[HTTPServer] Sending file {filename} ({len(file_data)} bytes)")
 
-            self.node.send_app_data(
-                client_ip,
-                response,
-                protocol="TCP",
-                source_port=server_port,
-                destination_port=client_port,
-            )
+            self.send_http_response(client_ip, client_port, server_port, response_bytes)
 
     def send_http_response(self, client_ip, client_port, server_port, response):
+        if isinstance(response, str):
+            response = response.encode("utf-8")
         if self.verbose:
-            print("[HTTPServer] Sending response:", response.strip())
+            print("[HTTPServer] Sending response:", response[:50])
         self.node.send_app_data(
             client_ip,
-            response.encode("utf-8"),
+            response,
+            protocol="TCP",
+            source_port=server_port,
+            destination_port=client_port,
+        )
+
+
+class TLSClient:
+    def __init__(self, node, verbose=False):
+        self.node = node
+        self.verbose = verbose
+        self.handshake_state = {}
+        self.shared_keys = {}
+
+    def get_state(self, connection_key):
+        return self.handshake_state.get(connection_key, "IDLE")
+
+    def is_established(self, connection_key):
+        return self.get_state(connection_key) == "ESTABLISHED"
+
+    def start_handshake(self, connection_key):
+        if self.verbose:
+            print(
+                f"[TLSClient] start_handshake: Sending ClientHello for {connection_key}"
+            )
+
+        self.handshake_state[connection_key] = "WAIT_SERVER_HELLO"
+        self.shared_keys[connection_key] = None
+
+        self._send_tls_message(connection_key, b"ClientHello")
+
+    def on_packet_received(self, packet):
+        data = packet.payload
+        if not data:
+            if self.verbose:
+                print("[TLSClient] Received empty payload (likely ACK). Ignoring.")
+            return
+
+        src_ip = packet.header["source_ip"]
+        src_port = packet.header["source_port"]
+        connection_key = (src_ip, src_port)
+
+        state = self.get_state(connection_key)
+        if state.startswith("WAIT"):
+            self._handle_handshake_message(connection_key, data)
+        else:
+            if self.is_established(connection_key):
+                if self.verbose:
+                    print(
+                        f"[TLSClient] Received encrypted data in established state: {data[:50]} ..."
+                    )
+
+    def _handle_handshake_message(self, connection_key, data):
+        state = self.get_state(connection_key)
+
+        if state == "WAIT_SERVER_HELLO":
+            if data.startswith(b"ServerHello"):
+                if self.verbose:
+                    print(f"[TLSClient] Received ServerHello from {connection_key}")
+                self._send_tls_message(connection_key, b"ClientKeyExchange")
+                self.handshake_state[connection_key] = "WAIT_SERVER_FINISHED"
+
+        elif state == "WAIT_SERVER_FINISHED":
+            if data.startswith(b"ServerFinished"):
+                self._send_tls_message(connection_key, b"ClientFinished")
+                self.handshake_state[connection_key] = "ESTABLISHED"
+                if self.verbose:
+                    print(
+                        f"[TLSClient] TLS Handshake finished for {connection_key}"
+                    )
+            else:
+                if self.verbose:
+                    print(
+                        f"[TLSClient] Unexpected handshake message. Received: {data}"
+                    )
+
+    def _send_tls_message(self, connection_key, msg: bytes):
+        dst_ip, dst_port = connection_key
+        if self.verbose:
+            print(
+                f"[TLSClient] Sending TLS message {msg[:30]}... to {dst_ip}:{dst_port}"
+            )
+            print(
+                f"[TLSClient] Current handshake state for {connection_key}: {self.get_state(connection_key)}"
+            )
+        self.node.send_app_data(
+            dst_ip,
+            msg,
+            protocol="TCP",
+            destination_port=dst_port,
+        )
+
+    def encrypt(self, connection_key, plaintext: bytes) -> bytes:
+        if not self.is_established(connection_key):
+            return plaintext
+
+        return b"ENC(" + plaintext + b")"
+
+    def decrypt(self, connection_key, ciphertext: bytes) -> bytes:
+        if not self.is_established(connection_key):
+            return ciphertext
+
+        if ciphertext.startswith(b"ENC(") and ciphertext.endswith(b")"):
+            return ciphertext[4:-1]
+        return ciphertext
+
+
+class TLSServer:
+    def __init__(self, node, verbose=False):
+        self.node = node
+        self.verbose = verbose
+        self.handshake_state = {}
+        self.shared_keys = {}
+
+    def get_state(self, connection_key):
+        return self.handshake_state.get(connection_key, "IDLE")
+
+    def is_established(self, connection_key):
+        return self.get_state(connection_key) == "ESTABLISHED"
+
+    def accept_handshake(self, connection_key):
+        self.handshake_state[connection_key] = "WAIT_CLIENT_HELLO"
+        self.shared_keys[connection_key] = None
+        if self.verbose:
+            print(f"[TLSServer] Ready to accept TLS handshake from {connection_key}")
+
+    def on_packet_received(self, packet):
+        data = packet.payload
+        if not data:
+            if self.verbose:
+                print("[TLSServer] Received empty payload (likely ACK). Ignoring.")
+            return
+
+        src_ip = packet.header["source_ip"]
+        src_port = packet.header["source_port"]
+        dst_port = packet.header["destination_port"]
+        connection_key = (src_ip, src_port)
+
+        if self.verbose:
+            print(
+                f"[TLSServer] Received packet from {src_ip}:{src_port} to port {dst_port}"
+            )
+            print(f"[TLSServer] Payload: {data[:50]}...")
+            print(
+                f"[TLSServer] Current handshake state for {connection_key}: {self.get_state(connection_key)}"
+            )
+
+        state = self.get_state(connection_key)
+        if state.startswith("WAIT"):
+            self._handle_handshake_message(connection_key, data)
+        else:
+            if self.is_established(connection_key):
+                if self.verbose:
+                    print(
+                        f"[TLSServer] Received encrypted data in established state: {data[:50]} ..."
+                    )
+
+    def _handle_handshake_message(self, connection_key, data):
+        state = self.get_state(connection_key)
+
+        if state == "WAIT_CLIENT_HELLO":
+            if data.startswith(b"ClientHello"):
+                if self.verbose:
+                    print(f"[TLSServer] Received ClientHello, sending ServerHello")
+                self._send_tls_message(connection_key, b"ServerHello")
+                self.handshake_state[connection_key] = "WAIT_CLIENT_KEYEXCHANGE"
+
+        elif state == "WAIT_CLIENT_KEYEXCHANGE":
+            if data.startswith(b"ClientKeyExchange"):
+                if self.verbose:
+                    print(
+                        f"[TLSServer] Received ClientKeyExchange, sending ServerFinished"
+                    )
+                self._send_tls_message(connection_key, b"ServerFinished")
+                self.handshake_state[connection_key] = "WAIT_CLIENT_FINISHED"
+
+        elif state == "WAIT_CLIENT_FINISHED":
+            if data.startswith(b"ClientFinished"):
+                if self.verbose:
+                    print(f"[TLSServer] Received ClientFinished, handshake complete")
+                self.handshake_state[connection_key] = "ESTABLISHED"
+                self.shared_keys[connection_key] = b"MySharedKey"
+                if self.verbose:
+                    print(f"[TLSServer] TLS Handshake finished for {connection_key}")
+            else:
+                if self.verbose:
+                    print(f"[TLSServer] Unexpected handshake message. Received: {data}")
+
+    def _send_tls_message(self, connection_key, msg: bytes):
+        dst_ip, dst_port = connection_key
+        if self.verbose:
+            print(
+                f"[TLSServer] Sending TLS message {msg[:30]}... to {dst_ip}:{dst_port}"
+            )
+            print(
+                f"[TLSServer] Current handshake state for {connection_key}: {self.get_state(connection_key)}"
+            )
+        self.node.send_app_data(
+            dst_ip,
+            msg,
+            protocol="TCP",
+            destination_port=dst_port,
+        )
+
+    def encrypt(self, connection_key, plaintext: bytes) -> bytes:
+        if not self.is_established(connection_key):
+            return plaintext
+        return b"ENC(" + plaintext + b")"
+
+    def decrypt(self, connection_key, ciphertext: bytes) -> bytes:
+        if not self.is_established(connection_key):
+            return ciphertext
+        if ciphertext.startswith(b"ENC(") and ciphertext.endswith(b")"):
+            return ciphertext[4:-1]
+        return ciphertext
+
+
+class HTTPSClient(HTTPClient):
+    def __init__(self, node, server_url=None, verbose=False):
+        super().__init__(node, server_url=server_url, verbose=verbose)
+        self.tls_client = TLSClient(node, verbose=verbose)
+        self._https_connection_key = None
+        self.request_sent = False
+        self.bytes_received = 0
+        self.content_length = None
+        self.transfer_done = False
+
+    def _initiate_connection(self, server_ip, server_port):
+        if self.verbose:
+            print(
+                "[HTTPSClient] TCP接続を要求しています(HTTPS):", server_ip, server_port
+            )
+        self.server_ip = server_ip
+        self.server_port = server_port
+        self.state = "CONNECTING"
+
+        self.node.initiate_tcp_handshake(server_ip, server_port)
+
+        if self.verbose:
+            print(
+                f"[HTTPSClient] Mapping HTTPS接続 -> {server_ip}:{server_port}"
+            )
+        self.app_manager.map_connection_to_app(
+            (server_ip, server_port), "HTTPS"
+        )
+
+    def on_connection_established(self, connection_key):
+        self.state = "CONNECTED"
+        self._https_connection_key = connection_key
+        self.request_sent = False
+        self.bytes_received = 0
+        self.content_length = None
+        self.transfer_done = False
+        if self.verbose:
+            print(
+                "[HTTPSClient] TCP接続が確立しました。TLSハンドシェイクを開始します。"
+            )
+
+        self.tls_client.start_handshake(connection_key)
+
+    def on_packet_received(self, packet):
+        self.tls_client.on_packet_received(packet)
+
+        connection_key = (packet.header["source_ip"], packet.header["source_port"])
+        if self.tls_client.is_established(connection_key):
+            if (
+                self.file_to_retrieve
+                and self.state == "CONNECTED"
+                and not self.request_sent
+            ):
+                request = f"GET /{self.file_to_retrieve} HTTP/1.0\r\n\r\n"
+                self.send_http_request(request)
+                self.request_sent = True
+                if self.verbose:
+                    print("[HTTPSClient] HTTPSリクエストを送信しました。")
+
+            decrypted = self.tls_client.decrypt(connection_key, packet.payload)
+            if not self.transfer_done:
+                if decrypted.startswith(b"HTTP/1.0 200 OK"):
+                    if self.content_length is None and b"Content-Length:" in decrypted:
+                        header_end = decrypted.find(b"\r\n\r\n")
+                        if header_end != -1:
+                            headers = decrypted[:header_end].decode(
+                                "utf-8", errors="ignore"
+                            )
+                            for line in headers.split("\r\n"):
+                                if line.startswith("Content-Length:"):
+                                    self.content_length = int(
+                                        line.split(":")[1].strip()
+                                    )
+                                    if self.verbose:
+                                        print(
+                                            f"[HTTPSClient] Content-Length: {self.content_length}"
+                                        )
+
+                            body = decrypted[header_end + 4 :]
+                            self.bytes_received += len(body)
+                    else:
+                        self.bytes_received += len(decrypted)
+
+                    if (
+                        self.content_length is not None
+                        and self.bytes_received >= self.content_length
+                    ):
+                        self.transfer_done = True
+                        if self.verbose:
+                            print(
+                                f"[HTTPSClient] ファイル転送が完了しました。(受信: {self.bytes_received} bytes)"
+                            )
+                        self.node.terminate_TCP_connection(
+                            (connection_key[0], connection_key[1])
+                        )
+                        if self.verbose:
+                            print("[HTTPSClient] TCPコネクションを閉じました。")
+
+                    if self.verbose:
+                        print(
+                            "[HTTPSClient] (TLS) ファイルの取得に成功しました。進捗: {}/{}".format(
+                                self.bytes_received,
+                                self.content_length if self.content_length else "不明",
+                            )
+                        )
+
+                elif decrypted.startswith(b"HTTP/1.0 404"):
+                    if self.verbose:
+                        print(
+                            "[HTTPSClient] (TLS) ファイルが見つかりません:",
+                            decrypted.decode("utf-8", errors="ignore"),
+                        )
+                    self.transfer_done = True
+                    self.node.terminate_TCP_connection(connection_key)
+                    if self.verbose:
+                        print("[HTTPSClient] TCPコネクションを閉じました。")
+            return
+
+    def send_https_request(self, request: str):
+        if self._https_connection_key is None:
+            if self.verbose:
+                print("[HTTPSClient] Error: TCP接続がまだ確立されていません。")
+            return
+        if not self.tls_client.is_established(self._https_connection_key):
+            if self.verbose:
+                print("[HTTPSClient] Error: TLSハンドシェイクが完了していません。")
+            return
+
+        request_bytes = request.encode("utf-8")
+        enc_data = self.tls_client.encrypt(self._https_connection_key, request_bytes)
+        dst_ip, dst_port = self._https_connection_key
+        self.node.send_app_data(
+            dst_ip, enc_data, protocol="TCP", destination_port=dst_port
+        )
+
+
+class HTTPSServer(HTTPServer):
+    def __init__(self, node, shared_files, verbose=False):
+        super().__init__(node, shared_files, verbose=verbose)
+        self.tls_server = TLSServer(node, verbose=verbose)
+        self.https_outgoing_data = {}
+
+    def on_connection_established(self, connection_key):
+        if self.verbose:
+            print(
+                "[HTTPSServer] TCP接続を受け付けました。TLSハンドシェイクを開始します。"
+            )
+        super().on_connection_established(connection_key)
+
+        self.tls_server.accept_handshake(connection_key)
+
+    def on_packet_received(self, packet):
+        self.tls_server.on_packet_received(packet)
+
+        connection_key = (packet.header["source_ip"], packet.header["source_port"])
+        if not self.tls_server.is_established(connection_key):
+            if self.verbose:
+                print(
+                    "[HTTPSServer] TLSハンドシェイク中です。状態:",
+                    self.tls_server.get_state(connection_key),
+                )
+            return
+
+        decrypted = self.tls_server.decrypt(connection_key, packet.payload)
+        if self.verbose and decrypted:
+            print(f"[HTTPSServer] (TLS) 復号されたHTTPリクエスト: {decrypted[:60]} ...")
+
+        fake_packet = self._create_fake_http_packet(packet, decrypted)
+        super().on_packet_received(fake_packet)
+
+    def get_data_chunk(self, connection_key, payload_size):
+        data = self.https_outgoing_data.get(connection_key, b"")
+        chunk = data[:payload_size]
+        return chunk
+
+    def update_data_after_send(self, connection_key, sent_bytes):
+        data = self.https_outgoing_data.get(connection_key, b"")
+        self.https_outgoing_data[connection_key] = data[sent_bytes:]
+
+    def _create_fake_http_packet(self, original_packet, new_payload):
+        from copy import deepcopy
+
+        new_packet = deepcopy(original_packet)
+        new_packet.payload = new_payload
+        return new_packet
+
+    def send_http_response(self, client_ip, client_port, server_port, response):
+        connection_key = (client_ip, client_port)
+        if not self.tls_server.is_established(connection_key):
+            super().send_http_response(client_ip, client_port, server_port, response)
+            return
+
+        if isinstance(response, str):
+            response_bytes = response.encode("utf-8")
+        else:
+            response_bytes = response
+
+        enc_data = self.tls_server.encrypt(connection_key, response_bytes)
+        if self.verbose:
+            print(f"[HTTPSServer] (TLS) 暗号化されたレスポンスを送信: {len(enc_data)} バイト")
+        self.node.send_app_data(
+            client_ip,
+            enc_data,
             protocol="TCP",
             source_port=server_port,
             destination_port=client_port,

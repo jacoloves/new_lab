@@ -18,6 +18,7 @@ class Packet:
     ):
         self.network_event_scheduler = network_event_scheduler
         self.id = str(uuid.uuid4())
+        # MACヘッダとIPヘッダを分割して管理
         self.mac_header = {"source_mac": source_mac, "destination_mac": destination_mac}
         self.ip_header = {
             "source_ip": source_ip,
@@ -27,52 +28,55 @@ class Packet:
             "fragment_offset": fragment_offset,
             "dscp": dscp,
         }
-
         self.size = header_size + payload_size
         self.creation_time = self.network_event_scheduler.current_time
         self.arrival_time = None
 
     @property
     def header(self):
+        # MACヘッダとIPヘッダを統合して返す
         return {**self.mac_header, **self.ip_header}
 
+    # MACヘッダを疑似的に除去するメソッド
     def remove_mac_header(self):
         self.mac_header = {}
 
+    # MACヘッダを再付与するメソッド
     def add_mac_header(self, source_mac, destination_mac):
         self.mac_header = {"source_mac": source_mac, "destination_mac": destination_mac}
 
-    # [q] なぜDSCPのプライオリティは8刻みなのか？
     def get_priority(self):
+        # Map DSCP values to priority levels (0-7, with 7 being the highest priority)
         dscp = self.ip_header["dscp"]
-        if dscp >= 56:
+        if dscp >= 56:  # Network Control
             return 7
-        elif dscp >= 48:
+        elif dscp >= 48:  # Expedited Forwarding
             return 6
-        elif dscp >= 40:
+        elif dscp >= 40:  # Assured Forwarding 4
             return 5
-        elif dscp >= 32:
+        elif dscp >= 32:  # Assured Forwarding 3
             return 4
-        elif dscp >= 24:
+        elif dscp >= 24:  # Assured Forwarding 2
             return 3
-        elif dscp >= 16:
+        elif dscp >= 16:  # Assured Forwarding 1
             return 2
-        elif dscp >= 8:
+        elif dscp >= 8:  # Class Selector
             return 1
-        else:
+        else:  # Best Effort
             return 0
-
 
     def set_arrived(self, arrival_time):
         self.arrival_time = arrival_time
 
     def __lt__(self, other):
-        return False
+        return id(self) < id(other)  # heapqでの比較のため（一意な順序を保証）
 
     def __str__(self):
         source_mac = self.mac_header.get("source_mac", "不明")
         destination_mac = self.mac_header.get("destination_mac", "不明")
-        return f"パケット(送信元MAC: {self.header['source_mac']}, 宛先MAC: {self.header['destination_mac']}, 送信元IP: {self.header['source_ip']}, 宛先IP: {self.header['destination_ip']}, TTL: {self.header['ttl']}, フラグメントフラグ: {self.header['fragment_flags']}, フラグメントオフセット: {self.header['fragment_offset']}, ペイロード: {self.payload})"
+        payload = getattr(self, "payload", "(no payload)")
+        return f"パケット(送信元MAC: {source_mac}, 宛先MAC: {destination_mac}, 送信元IP: {self.ip_header['source_ip']}, 宛先IP: {self.ip_header['destination_ip']}, TTL: {self.ip_header['ttl']}, フラグメントフラグ: {self.ip_header['fragment_flags']}, フラグメントオフセット: {self.ip_header['fragment_offset']}, ペイロード: {payload})"
+
 
 class TCPPacket(Packet):
     def __init__(
@@ -91,13 +95,15 @@ class TCPPacket(Packet):
             "destination_port": destination_port,
             "sequence_number": sequence_number,
             "acknowledgment_number": acknowledgment_number,
-            "flags": flags
+            "flags": flags,
         }
         self.payload = data
 
     @property
     def header(self):
+        # MACヘッダ、IPヘッダ、TCPヘッダを統合して返す
         return {**self.mac_header, **self.ip_header, **self.tcp_header}
+
 
 class UDPPacket(Packet):
     def __init__(self, source_port, destination_port, data=b"", **kwargs):
@@ -110,7 +116,9 @@ class UDPPacket(Packet):
 
     @property
     def header(self):
+        # MACヘッダ、IPヘッダ、UDPヘッダを統合して返す
         return {**self.mac_header, **self.ip_header, **self.udp_header}
+
 
 class ARPPacket(Packet):
     def __init__(
@@ -129,22 +137,23 @@ class ARPPacket(Packet):
             destination_ip=destination_ip,
             ttl=1,
             fragment_flags={},
-            fragment_offset=0,
+            fragment_offset=0,  # ダミーのTTLとフラグメント情報
             dscp=56,
-            header_size=28,
-            payload_size=28,
+            header_size=28,  # ARPヘッダの標準的なサイズ
+            payload_size=28,  # ARPパケットのペイロードサイズ
             network_event_scheduler=network_event_scheduler,
         )
-
+        # ARP特有の情報をペイロードとして設定
         self.payload = {
-            "operation": operation,
-            "source_mac": source_mac,
-            "destination_mac": destination_mac,
-            "source_ip": source_ip,
-            "destination_ip": destination_ip,
+            "operation": operation,  # ARP操作（"request"または"reply"）
+            "source_mac": source_mac,  # 送信元MACアドレス
+            "destination_mac": destination_mac,  # 宛先MACアドレス
+            "source_ip": source_ip,  # 送信元IPアドレス
+            "destination_ip": destination_ip,  # 宛先IPアドレス
         }
 
     def __str__(self):
+        # ARPパケットの情報を文字列で返す
         return f"ARPPacket(送信元MAC: {self.mac_header['source_mac']}, 宛先MAC: {self.mac_header['destination_mac']}, 操作: {self.payload['operation']})"
 
 
@@ -164,22 +173,24 @@ class DNSPacket(Packet):
             destination_mac=destination_mac,
             source_ip=source_ip,
             destination_ip=destination_ip,
-            ttl=64,
+            ttl=64,  # DNSパケットのTTLは通常のIPパケットと同様に設定
             dscp=56,
             fragment_flags={},
             fragment_offset=0,
-            header_size=0,
-            payload_size=0,
+            header_size=0,  # DNSヘッダサイズは固定ではないため、具体的なサイズは省略
+            payload_size=0,  # 実際のペイロードサイズはクエリによって異なる
             network_event_scheduler=network_event_scheduler,
         )
-        self.query_domain = query_domain
-        self.query_type = query_type
+        self.query_domain = query_domain  # 問い合わせるドメイン名
+        self.query_type = query_type  # 問い合わせるタイプ（例: A, AAAA, MXなど）
+        # DNSクエリまたはレスポンスの詳細情報を格納するためのプレースホルダ
         self.dns_data = {}
 
     def __str__(self):
         source_mac = self.mac_header.get("source_mac", "不明")
         destination_mac = self.mac_header.get("destination_mac", "不明")
         return f"DNSPacket(送信元MAC: {source_mac}, 宛先MAC: {destination_mac}, 送信元IP: {self.ip_header['source_ip']}, 宛先IP: {self.ip_header['destination_ip']}, Query Domain: {self.query_domain}, Query Type: {self.query_type})"
+
 
 class DHCPPacket(Packet):
     def __init__(
@@ -196,17 +207,18 @@ class DHCPPacket(Packet):
             destination_mac=destination_mac,
             source_ip=source_ip,
             destination_ip=destination_ip,
-            ttl=255,
+            ttl=255,  # DHCPパケットは通常ローカルネットワーク内でのみ流れるためTTLは最大値
             dscp=56,
             fragment_flags={},
             fragment_offset=0,
-            header_size=240,
-            payload_size=0,
+            header_size=240,  # DHCPパケットのヘッダサイズは固定で240バイト
+            payload_size=0,  # 実際のペイロードサイズはオプションによって異なる
             network_event_scheduler=network_event_scheduler,
         )
         self.message_type = (
-            message_type
+            message_type  # DHCPメッセージタイプ ('DISCOVER', 'OFFER', 'REQUEST', 'ACK')
         )
+        # DHCPメッセージの詳細情報を格納するためのプレースホルダ
         self.dhcp_data = {}
 
     def __str__(self):
@@ -228,11 +240,11 @@ class BPDU(Packet):
         super().__init__(
             source_mac=source_mac,
             destination_mac=destination_mac,
-            source_ip="0.0.0.0/24",
-            destination_ip="0.0.0.0/24",
+            source_ip="0.0.0.0/24",  # IPv4用ダミーIPアドレス
+            destination_ip="0.0.0.0/24",  # IPv4用ダミーIPアドレス
             ttl=1,
             fragment_flags={},
-            fragment_offset=0,
+            fragment_offset=0,  # ダミーのTTLとフラグメント情報
             dscp=56,
             header_size=20,
             payload_size=50,
@@ -261,22 +273,22 @@ class HelloPacket(Packet):
     ):
         super().__init__(
             source_mac=source_mac,
-            destination_mac="FF:FF:FF:FF:FF:FF",
+            destination_mac="FF:FF:FF:FF:FF:FF",  # OSPF Helloパケットは通常ブロードキャスト
             source_ip=source_ip,
-            destination_ip="224.0.0.5",
-            ttl=1,
+            destination_ip="224.0.0.5",  # OSPF Helloパケットの標準的な宛先IPアドレス
+            ttl=1,  # OSPF HelloパケットのTTLは通常1
             fragment_flags={},
             fragment_offset=0,
             dscp=56,
-            header_size=24,
-            payload_size=20,
+            header_size=24,  # OSPF Helloパケットのヘッダサイズ
+            payload_size=20,  # 適切なペイロードサイズを設定
             network_event_scheduler=network_event_scheduler,
         )
         self.payload = {
             "network_mask": network_mask,
             "router_id": router_id,
             "hello_interval": hello_interval,
-            "neighbors": neighbors,
+            "neighbors": neighbors,  # 隣接ルータのリスト
         }
 
     def __str__(self):
@@ -295,20 +307,20 @@ class LSAPacket(Packet):
     ):
         super().__init__(
             source_mac=source_mac,
-            destination_mac="FF:FF:FF:FF:FF:FF",
+            destination_mac="FF:FF:FF:FF:FF:FF",  # LSAは通常ブロードキャスト
             source_ip=source_ip,
-            destination_ip="224.0.0.5",
-            ttl=1,
+            destination_ip="224.0.0.5",  # OSPFのマルチキャストアドレス
+            ttl=1,  # OSPFパケットのTTLは通常1
             dscp=56,
             fragment_flags={},
             fragment_offset=0,
-            header_size=24,
-            payload_size=100,
+            header_size=24,  # 適切なヘッダサイズを設定
+            payload_size=100,  # トポロジ情報に基づいて調整
             network_event_scheduler=network_event_scheduler,
         )
         self.payload = {
             "router_id": router_id,
-            "sequence_number": sequence_number,
+            "sequence_number": sequence_number,  # シーケンス番号を追加
             "link_state_info": link_state_info,
         }
 

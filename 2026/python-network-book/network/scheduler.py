@@ -240,7 +240,8 @@ class NetworkEventScheduler:
 
     def log_cwnd_event(self, log_entry):
         self.cwnd_log.append(log_entry)
-        print(f"Logged cwnd event: {log_entry}")
+        if self.tcp_verbose:
+            print(f"Logged cwnd event: {log_entry}")
 
     def get_cwnd_log(self):
         return self.cwnd_log
@@ -433,11 +434,15 @@ class NetworkEventScheduler:
     def generate_throughput_graph(self, packet_logs):
         time_slot = 1.0  # 時間スロットを1秒に固定
 
-        max_time = max(
+        arrived_times = [
             log["arrival_time"]
             for log in packet_logs.values()
-            if log["arrival_time"] is not None
-        )
+            if log["arrival_time"] is not None and log["arrival_time"] > 0
+        ]
+        if not arrived_times:
+            print("No packets with valid arrival_time. Cannot generate throughput graph.")
+            return
+        max_time = max(arrived_times)
         min_time = min(log["creation_time"] for log in packet_logs.values())
         num_slots = int((max_time - min_time) / time_slot) + 1  # スロットの総数を計算
 

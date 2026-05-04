@@ -104,6 +104,11 @@ class DNSServer(Server):
                     packet, "DNS query received", self.node_id
                 )
                 dns_response_packet = self.handle_dns_query(packet)
+                if dns_response_packet is None:
+                    self.network_event_scheduler.log_packet_info(
+                        packet, "DNS query NXDOMAIN (domain not found)", self.node_id
+                    )
+                    return
                 self.network_event_scheduler.log_packet_info(
                     dns_response_packet, "DNS response", self.node_id
                 )
@@ -221,6 +226,7 @@ class DHCPServer(Server):
             message_type="OFFER",
             network_event_scheduler=self.network_event_scheduler,
         )
+        # Set DHCP-specific data
         dhcp_offer_packet.dhcp_data = {
             "offered_ip": offered_ip,
             "dns_server_ip": self.dns_server_ip,

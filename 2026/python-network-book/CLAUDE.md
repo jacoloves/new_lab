@@ -17,7 +17,7 @@ python chap12/scenario_chap12a.py
 
 ## アーキテクチャ概要
 
-本リポジトリは **イベント駆動型ネットワークシミュレーター** の実装で、書籍の各章（chap3〜chap13）の演習シナリオから `network/` パッケージを利用する構成になっている。
+本リポジトリは **イベント駆動型ネットワークシミュレーター** の実装で、書籍の各章（chap3〜chap14）の演習シナリオから `network/` パッケージを利用する構成になっている。
 
 ### シナリオとテストの違い
 
@@ -33,6 +33,8 @@ NetworkEventScheduler  ← シミュレーション全体の司令塔
     Link  ← 双方向リンク（帯域・遅延・ロス率・キューを持つ）
        ↓
   Packet / BPDU / ARPPacket / TCPPacket / DNSPacket / DHCPPacket  ← パケット表現
+       ↑
+  ApplicationManager（Node に内包） ← FTP/HTTP/UDP/DNS/DHCP アプリ層
 ```
 
 ### 各クラスの役割
@@ -43,7 +45,7 @@ NetworkEventScheduler  ← シミュレーション全体の司令塔
 - `log_enabled=True` でパケットログを収集、`generate_summary()` / `generate_throughput_graph()` / `generate_delay_histogram()` で統計・グラフを出力
 - デバッグフラグ: `verbose` / `stp_verbose` / `routing_verbose` / `nat_verbose` / `tcp_verbose` / `link_verbose`
 - `run_until(time)` で指定時刻まで実行、`run()` で全イベント完了まで実行
-- `seed` 指定で乱数シードを固定し再現性を確保（各 Node/Link も同じシードを共有）
+- `seed` 指定でスケジューラ初期化時に `random.seed(seed)` を一度だけ呼び、シミュレーション全体の乱数再現性を確保する（Node / Router / Link は個別に `random.seed()` を呼ばない）
 
 **`Link`** (`link.py`)
 - node_x → node_y, node_y → node_x の双方向に独立した **優先度付きキュー**（`defaultdict(list)`）を持つ
@@ -53,12 +55,12 @@ NetworkEventScheduler  ← シミュレーション全体の司令塔
 
 **`Node`** (`node.py`)
 - MAC アドレス + CIDR 表記 IP アドレスを持つ端末
-- `send_packet()` でフラグメンテーション（MTU=1500 デフォルト）を処理し、`receive_packet()` で再組み立て
-- `set_traffic()` で指定ビットレート・期間の UDP トラフィックを生成
-- `start_tcp_traffic(destination_url, ...)` で DNS 解決 → ARP → TCP 接続 → データ転送を自動実行
-- `start_udp_traffic(destination_url, bitrate, start_time, duration, header_size, payload_size, dscp)` で DSCP 値付き UDP トラフィックを生成（QoS 検証用）
-- DHCP クライアント機能（起動時に `schedule_dhcp_packet()` が呼ばれる）
-- ARP テーブル・DNS キャッシュ・TCP 接続状態・フラグメント再組み立てバッファを保持
+- `send_app_data(dst_ip, data, protocol, **kwargs)` がトランスポート層への主要送信口
+- `initiate_tcp_handshake(ip, port)` で TCP 3-way ハンドシェイクを開始
+- DHCP クライアント機能：IPアドレスがネットワークアドレスの場合、起動時に DISCOVER を自動送信
+- ARP テーブル・TCP 接続状態（`tcp_connections` dict）・フラグメント再組み立てバッファを保持
+- TCP 輻輳制御（スロースタート / 輻輳回避 / 高速再送）を内包
+- **未実装**: `start_udp_traffic()` / `start_tcp_traffic()` はシナリオ（chap10〜chap13）から呼ばれるが `Node` に定義されていない。`UDPApp` / `FTPClient` / `HTTPClient` への委譲ラッパーとして実装が必要
 
 **`Switch`** (`switch.py`)
 - MAC アドレステーブル（フォワーディングテーブル）によるL2転送
@@ -67,8 +69,9 @@ NetworkEventScheduler  ← シミュレーション全体の司令塔
 
 **`Router`** (`router.py`)
 - 複数 IP アドレスを持ち、`Link` 生成時に同一サブネットの IP ペアを自動選択してインタフェースに割り当て
+- 接続リンクの正規リストは `self.interfaces`（`Link → IP` の dict）。`self.links` は空のまま使われない
 - **OSPF** の Hello パケットと LSA（Link State Advertisement）交換による動的ルーティングを実装
-- **NAT** 機能あり（`nat_enabled=True`, `external_ip` 指定で有効化）
+- **NAT** 機能あり（`nat_enabled=True`, `external_ip` 指定で有効化）。IP 変換は `packet.ip_header` を直接変更する
 - ARP テーブルを保持し、未知の宛先 MAC に対して ARP を送信してパケットをキューイング
 
 **`Server`** (`server.py`) — 3 クラス構成
@@ -76,8 +79,13 @@ NetworkEventScheduler  ← シミュレーション全体の司令塔
 - `DNSServer`: `add_dns_record(domain, ip)` でAレコードを登録、DNS クエリに応答
 - `DHCPServer`: IP プールを管理し DISCOVER/REQUEST/ACK シーケンスを処理
 
-**`NetworkGraph`** (`graph.py`)
-- NetworkX + matplotlib によるトポロジー描画（エッジ幅=帯域幅のlog、エッジ色=遅延）
+**`ApplicationManager`** (`application.py`) — アプリケーション層の統合管理
+- `Node` に 1 対 1 で紐づき、`node.application_layer` としてアクセス
+- `DnsClient` / `DhcpClient` / `UDPApp` / `FTPClient` / `FTPServer` / `HTTPClient` / `HTTPServer` を束ねるファサード
+- `connection_app_map` で `(source_ip, source_port)` をアプリ種別にマッピングし、受信パケットを適切なアプリへ振り分ける
+- `FTPClient` / `FTPServer`: TCP ポート 21、USER/PASS/RETR シーケンスを実装、`shared_files` dict からバイナリファイル転送
+- `HTTPClient` / `HTTPServer`: TCP ポート 80、HTTP/1.0 GET のみ対応、`shared_files` dict からレスポンス返却
+- `data/` ディレクトリに転送用サンプルファイル（`cat.jpg` など）を配置し、`shared_files` に読み込んで使用
 
 ### シナリオファイルの構造
 
@@ -87,7 +95,7 @@ NetworkEventScheduler  ← シミュレーション全体の司令塔
 2. `Node` / `Switch` / `Router` / `DNSServer` / `DHCPServer` を生成（スケジューラに登録）
 3. `Link` で機器を接続（生成時に双方の `add_link()` が自動呼び出し）
 4. 必要に応じて静的ルーティングや DNS レコード・DHCP 使用済み IP を設定
-5. `node.set_traffic()` / `node.start_tcp_traffic()` / `node.start_udp_traffic()` でトラフィックをスケジュール
+5. トラフィックをスケジュール（`UDPApp.start_traffic()` / `FTPClient.connect()` など）
 6. `network_event_scheduler.run()` / `run_until()` でシミュレーション実行
 7. 各ノードの状態表示・ログ・統計・グラフを出力
 
@@ -106,3 +114,15 @@ NetworkEventScheduler  ← シミュレーション全体の司令塔
 | chap11 | DHCP |
 | chap12 | TCP（スロースタート・輻輳制御・DNS/DHCP 統合） |
 | chap13 | QoS・DSCP 優先度付きキューイング・UDP トラフィック整形 |
+| chap14 | アプリケーション層・FTP/HTTP ファイル転送・ApplicationManager |
+
+## 実装上の重要な注意点
+
+**`Packet.header` はゲッター専用プロパティ**  
+`packet.header["ttl"] -= 1` のような代入は無効（新規 dict に書いて捨てる）。フィールドを変更する場合は `packet.ip_header["ttl"] -= 1` のように内部 dict を直接操作すること。同様に MAC ヘッダは `packet.mac_header`、TCP/UDP ヘッダは `packet.tcp_header` / `packet.udp_header` を直接参照する。
+
+**`Router.interfaces` と `Router.links`**  
+`add_link()` はリンクを `self.interfaces`（`{link: ip_cidr}` dict）に登録するが `self.links` リストには追加しない。リンク一覧の走査は `self.interfaces.keys()` で行う。
+
+**TCP 接続の受信済みシーケンス追跡**  
+`tcp_connections[key]["received_segments"]` に `(start_seq, end_seq)` タプルのリストで管理する（バイト単位 set ではない）。

@@ -7,7 +7,6 @@ from random import randint
 
 from .packet import ARPPacket, DNSPacket, Packet, DHCPPacket, TCPPacket, UDPPacket
 from .router import Router
-from network import packet
 from .application import ApplicationManager
 
 
@@ -19,15 +18,13 @@ class Node:
         network_event_scheduler,
         mac_address=None,
         dns_server=None,
-        mtu=1500,
+        mtu=10000,
         default_route=None,
     ):
         self.node_id = node_id
         self.ip_address = ip_address
         self.network_event_scheduler = network_event_scheduler
-        self.local_seed = self.network_event_scheduler.get_seed()
-        if self.local_seed is not None:
-            random.seed(self.local_seed)
+
         if mac_address is None:
             self.mac_address = self.generate_mac_address()
         else:
@@ -95,10 +92,7 @@ class Node:
 
     def generate_mac_address(self):
         return ":".join(
-            [
-                "{:02x}".format(uuid.uuid4().int >> elements & 0xFF)
-                for elements in range(0, 12, 2)
-            ]
+            ["{:02x}".format(uuid.uuid4().int >> (i * 8) & 0xFF) for i in range(6)]
         )
 
     def register_application(self, port, protocol, application_instance):
@@ -130,6 +124,18 @@ class Node:
                     self.application_layer, "register_http_client"
                 ):
                     self.application_layer.register_http_client(application_instance)
+
+            elif class_name == "HTTPSClient":
+                if self.application_layer and hasattr(
+                    self.application_layer, "register_https_client"
+                ):
+                    self.application_layer.register_https_client(application_instance)
+
+            elif class_name == "HTTPSServer":
+                if self.application_layer and hasattr(
+                    self.application_layer, "register_https_server"
+                ):
+                    self.application_layer.register_https_server(application_instance)
 
     def select_available_port(self):
         for port in range(1024, 49152):
@@ -704,15 +710,21 @@ class Node:
         start_seq = received_sequence_number
         end_seq = received_sequence_number + payload_length
 
-        received_seq_set = conn_info.setdefault("received_sequence_number", set())
-        for seq in range(start_seq, end_seq):
-            received_seq_set.add(seq)
+        # バイト単位ではなくセグメント単位で受信済み範囲を記録（メモリ効率化）
+        received_segments = conn_info.setdefault("received_segments", [])
+        received_segments.append((start_seq, end_seq))
 
         out_of_order = conn_info.setdefault("out_of_order_packets", [])
 
+        # current_ack_number から連続して受信済みのセグメントを辿って次の期待シーケンスを求める
         next_expected = current_ack_number
-        while next_expected in received_seq_set:
-            next_expected += 1
+        changed = True
+        while changed:
+            changed = False
+            for seg_start, seg_end in received_segments:
+                if seg_start <= next_expected < seg_end:
+                    next_expected = seg_end
+                    changed = True
 
         if next_expected > current_ack_number:
             conn_info["acknowledgment_number"] = next_expected
@@ -823,13 +835,13 @@ class Node:
                 print("Error: Connection key not found in tcp_connections.")
 
     def terminate_TCP_connection(self, connection_key):
-        if self.network_event_scheduler.tcp_verbose:
-            print(f"Terminating TCP connection with {connection_key}")
         if connection_key in self.tcp_connections:
             del self.tcp_connections[connection_key]
-            print(f"TCP connection terminated with {connection_key}")
+            if self.network_event_scheduler.tcp_verbose:
+                print(f"TCP connection terminated with {connection_key}")
         else:
-            print("Error: Connection key not found.")
+            if self.network_event_scheduler.tcp_verbose:
+                print(f"Error: Connection key {connection_key} not found.")
 
     def print_tcp_connections(self):
         if not self.tcp_connections:
@@ -977,10 +989,11 @@ class Node:
                 "destination_port": destination_port,
             }
 
-            self.send_control_tcp_packet(
+            sent = self.send_control_tcp_packet(
                 destination_ip, b"", dscp, **control_packet_kwargs
             )
-            self.tcp_connections[connection_key]["sequence_number"] += 1
+            if sent:
+                self.tcp_connections[connection_key]["sequence_number"] += 1
 
     def send_app_data(self, dst_ip, data, protocol="TCP", **kwargs):
         if protocol == "TCP":
@@ -1004,7 +1017,6 @@ class Node:
                         f"No traffic info found for {connection_key}, setting up new connection or queueing data."
                     )
                 return
-
 
             app_type = self.application_layer.connection_app_map.get(
                 connection_key, None
@@ -1037,6 +1049,7 @@ class Node:
                 connection_key, "UDP", app_type=app_type, fixed_port=assigned_port
             )
 
+            dscp = kwargs.get("dscp", 0)
             destination_mac = self.get_mac_address_from_ip(dst_ip)
             if destination_mac is None:
                 self.send_arp_request(dst_ip)
@@ -1046,7 +1059,7 @@ class Node:
                     (
                         data,
                         protocol,
-                        0,
+                        dscp,
                         {
                             "source_port": source_port,
                             "destination_port": destination_port,
@@ -1060,7 +1073,7 @@ class Node:
                 dst_ip,
                 destination_mac,
                 data,
-                0,
+                dscp,
                 source_port=source_port,
                 destination_port=destination_port,
             )

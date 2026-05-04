@@ -19,9 +19,6 @@ class Router:
         nat_table=None,
     ):
         self.network_event_scheduler = network_event_scheduler
-        self.local_seed = self.network_event_scheduler.get_seed()
-        if self.local_seed is not None:
-            random.seed(self.local_seed)
         self.node_id = node_id
         self.links = []
         self.available_ips = {
@@ -105,7 +102,7 @@ class Router:
             raise ValueError(f"IPアドレス {ip_address} はこのルータに存在しません。")
 
     def get_available_ip_addresses(self):
-        return [ip for ip in self.available_ips if ip not in self.interfaces.values()]
+        return [ip for ip, used in self.available_ips.items() if not used]
 
     def add_route(self, destination_cidr, next_hop, link):
         self.routing_table[destination_cidr] = (next_hop, link)
@@ -197,21 +194,24 @@ class Router:
         )
 
     def flood_lsa(self, original_lsa_packet):
-        # リンク状態情報の取得
-        link_state_info = self.get_link_state_info()
-
         # 元のLSAパケットの送信元ルータIDを取得
         original_sender_id = original_lsa_packet.payload["router_id"]
 
-        # 各インターフェースをループしてLSAパケットを送信
+        # 各インターフェースをループしてLSAパケットを送信（インターフェースごとに新規パケットを生成）
         for link, ip_address in self.interfaces.items():
             # 送信元ルータを除外
             if (
                 link.node_x.node_id != original_sender_id
                 and link.node_y.node_id != original_sender_id
             ):
-                lsa_packet = original_lsa_packet
-                lsa_packet.header["source_mac"] = self.get_mac_address(link)
+                lsa_packet = LSAPacket(
+                    source_mac=self.get_mac_address(link),
+                    source_ip=ip_address,
+                    router_id=original_lsa_packet.payload["router_id"],
+                    sequence_number=original_lsa_packet.payload["sequence_number"],
+                    link_state_info=original_lsa_packet.payload["link_state_info"],
+                    network_event_scheduler=self.network_event_scheduler,
+                )
                 link.enqueue_packet(lsa_packet, self)
 
     def increment_lsa_sequence_number(self):
@@ -329,17 +329,17 @@ class Router:
 
         if direction == "outbound":
             # 外部ネットワークへのパケット送信時のNAT処理
-            original_src_ip = packet.header["source_ip"]
+            original_src_ip = packet.ip_header["source_ip"]
             # 変換テーブルに登録し、パケットの送信元IPを外部IPに変更
             self.nat_table[original_src_ip] = self.external_ip
-            packet.header["source_ip"] = self.external_ip
+            packet.ip_header["source_ip"] = self.external_ip
         elif direction == "inbound":
             # 外部ネットワークからのパケット受信時のNAT処理
-            original_dst_ip = packet.header["destination_ip"]
+            original_dst_ip = packet.ip_header["destination_ip"]
             # 変換テーブルを参照し、パケットの宛先IPを内部ネットワークのIPに変更
             internal_ip = self.nat_table.get(original_dst_ip)
             if internal_ip:
-                packet.header["destination_ip"] = internal_ip
+                packet.ip_header["destination_ip"] = internal_ip
 
     def print_nat_table(self):
         if not self.nat_table:
@@ -403,11 +403,11 @@ class Router:
             )
             return  # BPDUの場合、処理を終了
 
-        # 一般のパケットの場合、TTLを減らす
-        packet.header["ttl"] -= 1
+        # 一般のパケットの場合、TTLを減らす（ip_headerを直接変更する）
+        packet.ip_header["ttl"] -= 1
 
         # TTLが0以下になったら、パケットを破棄
-        if packet.header["ttl"] <= 0:
+        if packet.ip_header["ttl"] <= 0:
             self.network_event_scheduler.log_packet_info(
                 packet, "dropped due to TTL expired", self.node_id
             )
@@ -698,7 +698,7 @@ class Router:
     def get_link_to_neighbor(self, neighbor_router_id):
         # next_hopがNoneの場合、直接接続されたリンクを返す
         if neighbor_router_id is None:
-            for link in self.links:
+            for link in self.interfaces.keys():
                 if (
                     link.node_x.node_id == self.node_id
                     or link.node_y.node_id == self.node_id
@@ -706,11 +706,12 @@ class Router:
                     return link
             return None
 
-        # next_hopが他のルータの場合の処理
+        # next_hopが他のルータの場合の処理（Hello受信で確立された隣接情報を優先）
         if neighbor_router_id in self.neighbors:
             return self.neighbors[neighbor_router_id]["link"]
 
-        for link in self.links:
+        # フォールバック: interfaces から検索
+        for link in self.interfaces.keys():
             if (
                 link.node_x.node_id == neighbor_router_id
                 or link.node_y.node_id == neighbor_router_id
