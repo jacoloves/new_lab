@@ -1,0 +1,16 @@
+---
+- hosts: test_servers
+  tasks:
+    - name: Create directory
+      ansible.builtin.file:
+        path: /home/ansible/tmp
+        state: directory
+        owner: ansible
+        mode: "0755"
+
+    - name: Copy file
+      ansible.builtin.copy:
+        src: /etc/hosts
+        dest: /home/ansible/tmp/hosts
+        owner: ansible
+        mode: "0644"
