@@ -1,0 +1,46 @@
+---
+new_users:
+  adm_member_01:
+    comment: "Administration member 01"
+    initial_password: "{{ 'P@s$w0rd' | password_hash('sha256') }}"
+    groups: [administrators, system_managers, operators]
+    add_authorized_key: true
+    add_sudoers: true
+    priv: admin
+  ops_member_01:
+    comment: "Operation member 01"
+    initial_password: "{{ 'P@s$w0rd' | password_hash('sha256') }}"
+    groups: [operators]
+    add_authorized_key: true
+    add_sudoers: true
+    priv: operator
+  ops_member_02:
+    comment: "Operation member 02"
+    initial_password: "{{ 'P@s$w0rd' | password_hash('sha256') }}"
+    groups: [operators]
+    add_authorized_key: true
+    add_sudoers: true
+    priv: operator
+  alice:
+    comment: "Normal user alice"
+    initial_password: "{{ 'P@s$w0rd' | password_hash('sha256') }}"
+    groups: [users, web_designers]
+    add_authorized_key: false
+    add_sudoers: false
+  bob:
+    comment: "Normal user bob"
+    initial_password: "{{ 'P@s$w0rd' | password_hash('sha256') }}"
+    groups: [users, app_developers]
+    add_authorized_key: false
+    add_sudoers: true
+    priv: user
+  carol:
+    comment: "Normal user carol"
+    initial_password: "{{ 'P@s$w0rd' | password_hash('sha256') }}"
+    groups: [users, db_admins]
+    add_authorized_key: false
+    add_sudoers: false
+
+
+
+

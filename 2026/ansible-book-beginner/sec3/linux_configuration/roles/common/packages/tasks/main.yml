@@ -1,0 +1,20 @@
+---
+- name: Load the package management system specific variables
+  ansible.builtin.include_vars:
+    file: "{{ ansible_pkg_mgr }}.yml"
+
+- name: Install and Upadate the APT packages
+  ansible.builtin.apt:
+    name: "{{ item }}"
+    state: latest
+    update_cache: true
+  loop: "{{ required_packages }}"
+  when: ansible_pkg_mgr == "apt"
+
+- name: Install and Update the DNP packages
+  ansible.builtin.dnf:
+    name: "{{ item }}"
+    state: latest
+    update_cache: true
+  loop: "{{ required_packages }}"
+  when: ansible_pkg_mgr == "dnf"

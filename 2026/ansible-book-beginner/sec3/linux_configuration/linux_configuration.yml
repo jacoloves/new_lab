@@ -1,0 +1,18 @@
+---
+- name: Initialize )S setting for Linux Servers
+  hosts: linux_servers
+  become: true
+
+  tasks:
+    - ansible.builtin.import_role:
+        name: common/hostname
+      tags: hostname
+    - ansible.builtin.import_role:
+        name: common/locale
+      tags: locale
+    - ansible.builtin.import_role:
+        name: common/packages
+      tags: packages
+    - ansible.builtin.import_role:
+        name: common/users
+      tags: users

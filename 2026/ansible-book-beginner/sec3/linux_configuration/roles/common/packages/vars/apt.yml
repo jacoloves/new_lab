@@ -1,0 +1,7 @@
+---
+required_packages:
+  - "build-essential"
+  - "cowsay"
+  - "figlet"
+  - "neofetch"
+  - "vim"

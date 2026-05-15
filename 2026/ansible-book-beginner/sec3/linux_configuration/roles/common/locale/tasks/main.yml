@@ -1,0 +1,18 @@
+---
+- name: Set timezone via symlink
+  ansible.builtin.file:
+    src: "/usr/share/zoneinfo/{{ locale_timezone }}"
+    dest: /etc/localtime
+    state: link
+    force: true
+
+- name: Write timezone file
+  ansible.builtin.copy:
+    content: "{{ locale_timezone }}\n"
+    dest: /etc/timezone
+
+- name: Set locale
+  community.general.locale_gen:
+    name: "{{ locale_locale }}"
+    state: present
+  ignore_errors: true

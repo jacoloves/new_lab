@@ -1,0 +1,37 @@
+---
+- name: Customize for non-interactive SSH session
+  ansible.builtin.lineinfile:
+    path: "/home/{{ item.key }}/.bashrc"
+    insertbefore: "BOF"
+    line: if [ -z "$PS1" ] ; then return ; fi
+    state: present
+
+- name: Check for the existence of neofetch
+  ansible.builtin.stat:
+    path: /usr/bin/neofetch
+  register: neofetch_stats
+
+- name: Check for the existence of fastfetch
+  ansible.builtin.stat:
+    path: /usr/bin/fastfetch
+  register: fastfetch_stats
+
+- name: Customize for Login message with neofetch
+  ansible.builtin.blockinfile:
+    path: "/home/{{ item.key }}/.bashrc"
+    block: |
+      neofetch
+      figlet "Hi, ${USER}! Welcome to ${HOSTNAME}!" | cowsay -n
+    state: present
+  when: neofetch_stats.stat.exists == true
+
+- name: Customize for Login message with Fastfetch
+  ansible.builtin.blockinfile:
+    path: "/home/{{ item.key }}/.bashrc"
+    block: |
+      fastfetch
+      figlet "Hi, ${USER}! Welcome to ${HOSTNAME}!" | cowsay -n
+    state: present
+  when: fastfetch_stats.stat.exists == true
+
+

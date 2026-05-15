@@ -1,0 +1,40 @@
+---
+- name: Ensure groups exist
+  ansible.builtin.group:
+    name: "{{ item }}"
+  loop: "{{ new_users | dict2items | map(attribute='value.groups') | flatten | unique }}"
+
+- name: Create new users
+  ansible.builtin.user:
+    name: "{{ item.key }}"
+    password: "{{ item.value.initial_password }}"
+    comment: "{{ item.value.comment }}"
+    groups: "{{ item.value.groups }}"
+    shell: /bin/bash
+    home: "/home/{{ item.key }}"
+    state: present
+  loop: "{{ new_users | dict2items }}"
+
+- name: Distribute authorized key
+  ansible.posix.authorized_key:
+    user: "{{ item.key }}"
+    key: "{{ lookup('file', '/Users/stanaka/.ssh/ansible_id_rsa.pub') }}"
+    state: present
+  when: item.value.add_authorized_key == true
+  loop: "{{ new_users | dict2items }}"
+
+- name: Deploy temporary sudoers files
+  ansible.builtin.template:
+    src: "{{ item.value.priv }}_sudoers.j2"
+    dest: "/etc/sudoers.d/{{ item.key }}"
+    owner: root
+    group: root
+    mode: "0400"
+    validate: 'visudo -c -f %s'
+  when: item.value.add_sudoers == true
+  loop: "{{ new_users | dict2items }}"
+
+- name: Customize .bashrc file
+  ansible.builtin.include_tasks:
+    file: bashrc_customization.yml
+  loop: "{{ new_users | dict2items }}"
