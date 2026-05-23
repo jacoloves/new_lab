@@ -1,0 +1,13 @@
+---
+# firewalldはDockerではスキップ（ポートはdocker run時に設定済み）
+
+- name: check_install / Create nodeexporter group
+  ansible.builtin.group:
+    name: "{{ nodeexporter_os_group }}"
+
+- name: check_install / Create nodeexporter user
+  ansible.builtin.user:
+    name: "{{ nodeexporter_os_user }}"
+    group: "{{ nodeexporter_os_group }}"
+    shell: /sbin/nologin
+    create_home: false

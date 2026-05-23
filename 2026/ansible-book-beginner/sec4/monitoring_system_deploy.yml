@@ -1,0 +1,34 @@
+---
+- name: Deploy Node Exporter for the monitoring system
+  hosts: nodeexporter
+  become: true
+  tasks:
+    - ansible.builtin.import_role:
+        name: common
+      tags: common
+    - ansible.builtin.import_role:
+        name: nodeexporter
+      tags: nodeexporter
+
+- name: Deploy Prometheus for the monitoring system
+  hosts: prometheus
+  become: true
+  tasks:
+    - ansible.builtin.import_role:
+        name: common
+      tags: common
+    - ansible.builtin.import_role:
+        name: prometheus
+      tags: prometheus
+
+- name: Deploy Grafana for the monitoring system
+  hosts: grafana
+  become: true
+  tasks:
+    - ansible.builtin.import_role:
+        name: common
+      tags: common
+    - ansible.builtin.import_role:
+        name: grafana
+      tags: grafana
+

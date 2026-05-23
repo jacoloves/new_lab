@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files: []
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs;
+      - targets:
+          - {{ hostvars['prometheus_server'].ansible_host }}:{{ prometheus_port }}
+
+  - job_name: node_exporter
+    static_configs:
+      - targets:
+          - {{ hostvars['nodeexporter_server'].ansible_host }}:{{ nodeexporter_port }}

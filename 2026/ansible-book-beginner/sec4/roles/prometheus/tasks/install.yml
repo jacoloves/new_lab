@@ -1,0 +1,22 @@
+---
+- name: download / Download Prometheus file
+  ansible.builtin.unarchive:
+    src: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-{{ prometheus_arch }}.tar.gz"
+    dest: /usr/local/src
+    owner: "{{ prometheus_os_user }}"
+    group: "{{ prometheus_os_group }}"
+    remote_src: true
+
+- name: configure / Make directory /var/lin/prometheus
+  ansible.builtin.file:
+    path: /var/lib/prometheus
+    state: directory
+    owner: "{{ prometheus_os_user }}"
+    group: "{{ prometheus_os_group }}"
+    mode: '0755'
+
+- name: configure / Create prometheus symbolic link
+  ansible.builtin.file:
+    src: "/usr/local/src/prometheus-{{ prometheus_version }}.linux-{{ prometheus_arch }}/prometheus"
+    dest: /usr/local/prometheus
+    state: link

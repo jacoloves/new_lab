@@ -1,0 +1,33 @@
+---
+- name: configure / Reload and Enable Grafana service
+  ansible.builtin.systemd:
+    name: grafana-server
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: configure / Create Prometheus Date Source
+  community.grafana.grafana_datasource:
+    name: Prometheus
+    grafana_url: "http://{{ hostvars['grafana_server'].ansible_host }}:{{ grafana_port }}"
+    grafana_user: "{{ grafana_user }}"
+    grafana_password: "{{ grafana_password }}"
+    ds_type: prometheus
+    ds_url: "http://{{ hostvars['prometheus_server'].ansible_host }}:{{ prometheus_port }}"
+  register: register_datasource
+
+- name: configure / Create Grafana Data Source
+  ansible.builtin.template:
+    src: templates/grafana_dashboard.json.j2
+    dest: grafana_dashboard.json
+  vars:
+    datasource_uid: "{{ register_datasource.datasource.uid }}"
+
+- name: configure / Create Grafana dashboard
+  community.grafana.grafana_dashboard:
+    grafana_url: "http://{{ hostvars['grafana_server'].ansible_host }}:{{ grafana_port }}"
+    grafana_user: "{{ grafana_user }}"
+    grafana_password: "{{ grafana_password }}"
+    state: present
+    overwrite: true
+    path: grafana_dashboard.json

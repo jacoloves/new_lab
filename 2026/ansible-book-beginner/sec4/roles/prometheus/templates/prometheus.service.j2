@@ -1,0 +1,17 @@
+[Unit]
+Description=Prometheus - Monitoring system and time series database
+Documentation=https://prometheus.io/docs/introduction/overview/
+
+[Service]
+Restart=always
+User={{ prometheus_os_user }}
+Type=simple
+ExecStart=/usr/local/src/prometheus-{{ prometheus_version }}.linux-amd64/promethus \
+  --config.file=/usr/local/src/prometheus-{{ prometheus_version }}.linux-amd64/prometheus.yml \
+  --storage.tsdb.path=/var/lib/prometheus/data
+ExecReload=/bin/kill -HUP $MAINPID
+TimeoutStopSec=20s
+SendSIGKILL=no
+
+[Install]
+WantedBy=multi-user.target

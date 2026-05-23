@@ -1,0 +1,7 @@
+---
+prometheus_version: 2.42.0
+prometheus_port: 9090
+prometheus_os_group: prometheus
+prometheus_os_user: prometheus
+nodeexporter_port: 9100
+prometheus_arch: arm64

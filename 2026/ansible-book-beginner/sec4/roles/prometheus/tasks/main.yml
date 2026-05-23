@@ -1,0 +1,4 @@
+---
+- ansible.builtin.include_tasks: roles/prometheus/tasks/check_install.yml
+- ansible.builtin.include_tasks: roles/prometheus/tasks/install.yml
+- ansible.builtin.include_tasks: roles/prometheus/tasks/configure.yml

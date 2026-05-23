@@ -1,0 +1,9 @@
+---
+# firewalldはDockerではスキップ
+- name: check_install / Install apt-transport-https
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - software-properties-common
+    state: present
+    update_cache: true

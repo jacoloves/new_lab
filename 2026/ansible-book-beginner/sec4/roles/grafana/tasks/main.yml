@@ -1,0 +1,4 @@
+---
+- ansible.builtin.include_tasks: roles/grafana/tasks/check_install.yml
+- ansible.builtin.include_tasks: roles/grafana/tasks/install.yml
+- ansible.builtin.include_tasks: roles/grafana/tasks/configure.yml

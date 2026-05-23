@@ -1,0 +1,6 @@
+---
+nodeexporter_version: 1.5.0
+nodeexporter_port: 9100
+nodeexporter_os_group: nodeexporter
+nodeexporter_os_user: nodeexporter
+nodeexporter_arch: arm64

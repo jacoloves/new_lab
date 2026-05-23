@@ -1,0 +1,11 @@
+---
+- name: configure / Update apt packages
+  ansible.builtin.apt:
+    name: "*"
+    state: latest
+    update_cache: true
+
+- name: configure / Install apt packages
+  ansible.builtin.apt:
+    name: tar
+    state: latest

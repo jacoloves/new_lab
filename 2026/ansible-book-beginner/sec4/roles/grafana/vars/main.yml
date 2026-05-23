@@ -1,0 +1,8 @@
+---
+grafana_version: 13.0.1-01
+grafana_port: 3000
+grafana_user: admin
+grafana_password: ywe4wrd3
+
+prometheus_port: 9090
+nodeexporter_port: 9100

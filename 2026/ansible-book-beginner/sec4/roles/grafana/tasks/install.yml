@@ -1,0 +1,16 @@
+---
+- name: install / Add Grafana GPG key
+  ansible.builtin.apt_key:
+    url: https://apt.grafana.com/gpg.key
+    state: present
+
+- name: install / Add Grafana repository
+  ansible.builtin.apt_repository:
+    repo: "deb https://apt.grafana.com stable main"
+    state: present
+
+- name: install / Install Grafana
+  ansible.builtin.apt:
+    name: "grafana={{ grafana_version }}"
+    state: present
+    update_cache: true
