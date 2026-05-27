@@ -1,0 +1,31 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    openssh-server \
+    python3 \
+    sudo \
+    systemd \
+    systemd-sysv \
+    curl \
+    tar \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# ansibleユーザー作成 + sudoers設定
+RUN useradd -m -s /bin/bash ansible \
+  && echo "ansible ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ansible \
+  && chmod 440 /etc/sudoers.d/ansible
+
+# SSH設定
+RUN mkdir -p /run/sshd \
+  && mkdir -p /home/ansible/.ssh \
+  && chmod 700 /home/ansible/.ssh \
+  && chown ansible:ansible /home/ansible/.ssh
+
+# systemdをPID1として動作させる
+STOPSIGNAL SIGRTMIN+3
+EXPOSE 22
+CMD ["/sbin/init"]
