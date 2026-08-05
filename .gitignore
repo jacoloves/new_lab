@@ -113,6 +113,8 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
+*.tf_bk
+
 # ========================================
 # Docker / Kubernetes
 # ========================================
