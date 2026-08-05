@@ -23,6 +23,8 @@ python chap12/scenario_chap12a.py
 
 `scenario_chapNa.py` / `scenario_chapNb.py` は演習シナリオ、`scenario_chapNtest*.py` は動作確認用スクリプト。どちらも **pytest ではなく standalone スクリプト**で、`python <path>` で直接実行する。自動テストフレームワークは存在しない。
 
+なお `chap2/chap2.py` は `network/` パッケージを使わず独立の `node2` モジュールに依存する **2 章用の最小プロトタイプ**で、以降のアーキテクチャとは無関係（このファイルだけ別物として扱う）。
+
 ### `network/` パッケージの構成
 
 ```
@@ -81,10 +83,12 @@ NetworkEventScheduler  ← シミュレーション全体の司令塔
 
 **`ApplicationManager`** (`application.py`) — アプリケーション層の統合管理
 - `Node` に 1 対 1 で紐づき、`node.application_layer` としてアクセス
-- `DnsClient` / `DhcpClient` / `UDPApp` / `FTPClient` / `FTPServer` / `HTTPClient` / `HTTPServer` を束ねるファサード
+- `DnsClient` / `DhcpClient` / `UDPApp` / `FTPClient` / `FTPServer` / `HTTPClient` / `HTTPServer` / `TLSClient` / `TLSServer` / `HTTPSClient` / `HTTPSServer` を束ねるファサード
 - `connection_app_map` で `(source_ip, source_port)` をアプリ種別にマッピングし、受信パケットを適切なアプリへ振り分ける
 - `FTPClient` / `FTPServer`: TCP ポート 21、USER/PASS/RETR シーケンスを実装、`shared_files` dict からバイナリファイル転送
 - `HTTPClient` / `HTTPServer`: TCP ポート 80、HTTP/1.0 GET のみ対応、`shared_files` dict からレスポンス返却
+- `HTTPSClient` / `HTTPSServer`: `HTTPClient` / `HTTPServer` を継承し TCP ポート 443、`TLSClient` / `TLSServer` によるハンドシェイク完了後にアプリデータを暗号化送受信
+- 受信時のポート判定（`destination_port == 443` → HTTPS、それ以外 → HTTP）でサーバ側アプリを自動振り分け
 - `data/` ディレクトリに転送用サンプルファイル（`cat.jpg` など）を配置し、`shared_files` に読み込んで使用
 
 ### シナリオファイルの構造
@@ -115,6 +119,7 @@ NetworkEventScheduler  ← シミュレーション全体の司令塔
 | chap12 | TCP（スロースタート・輻輳制御・DNS/DHCP 統合） |
 | chap13 | QoS・DSCP 優先度付きキューイング・UDP トラフィック整形 |
 | chap14 | アプリケーション層・FTP/HTTP ファイル転送・ApplicationManager |
+| chap15 | HTTPS / TLS ハンドシェイク・暗号化通信（ClientHello〜共有鍵確立、HTTPS over TLS） |
 
 ## 実装上の重要な注意点
 
