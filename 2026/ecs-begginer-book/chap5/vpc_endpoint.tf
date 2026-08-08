@@ -38,6 +38,26 @@ resource "aws_vpc_endpoint" "ecr_dkr" {
   }
 }
 
+resource "aws_vpc_endpoint" "logs" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.ap-northeast-1.logs"
+  vpc_endpoint_type   = "Interface"
+  private_dns_enabled = true
+
+  subnet_ids = [
+    aws_subnet.private_egress_a.id,
+    aws_subnet.private_egress_c.id,
+  ]
+
+  security_group_ids = [
+    aws_security_group.egress_vpce.id,
+  ]
+
+  tags = {
+    Name = "sbcntr-logs"
+  }
+}
+
 resource "aws_vpc_endpoint" "s3" {
   vpc_id            = aws_vpc.main.id
   service_name      = "com.amazonaws.ap-northeast-1.s3"

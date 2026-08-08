@@ -157,3 +157,7 @@ dist-newstyle/
 # Claudeのワーキングファイル
 # ========================================
 .claude/worktrees/
+
+# misc
+describe
+memo.*
