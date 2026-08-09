@@ -52,7 +52,7 @@ resource "aws_iam_policy" "policy3" {
       {
         Effect   = "Allow"
         Action   = "secretsmanager:GetSecretValue"
-        Resource = "arn:aws:secretsmanager:ap-northeast-1:775115982694:secret:rds-db-credentials/cluster-DBZG3YHZEOIGJLADDUB22XIJWY/sbcntruser/1786244874556-IlvuR6"
+        Resource = aws_secretsmanager_secret.sbcntruser_db_credentials.arn
       }
     ]
   })

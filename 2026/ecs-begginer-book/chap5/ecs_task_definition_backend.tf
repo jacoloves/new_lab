@@ -51,15 +51,15 @@ resource "aws_ecs_task_definition" "backend_app" {
       secrets = [
         {
           name      = "DB_HOST"
-          valueFrom = "arn:aws:secretsmanager:ap-northeast-1:775115982694:secret:rds-db-credentials/cluster-DBZG3YHZEOIGJLADDUB22XIJWY/sbcntruser/1786244874556-IlvuR6:host::"
+          valueFrom = "${aws_secretsmanager_secret.sbcntruser_db_credentials.arn}:host::"
         },
         {
           name      = "DB_USERNAME"
-          valueFrom = "arn:aws:secretsmanager:ap-northeast-1:775115982694:secret:rds-db-credentials/cluster-DBZG3YHZEOIGJLADDUB22XIJWY/sbcntruser/1786244874556-IlvuR6:username::"
+          valueFrom = "${aws_secretsmanager_secret.sbcntruser_db_credentials.arn}:username::"
         },
         {
           name      = "DB_PASSWORD"
-          valueFrom = "arn:aws:secretsmanager:ap-northeast-1:775115982694:secret:rds-db-credentials/cluster-DBZG3YHZEOIGJLADDUB22XIJWY/sbcntruser/1786244874556-IlvuR6:password::"
+          valueFrom = "${aws_secretsmanager_secret.sbcntruser_db_credentials.arn}:password::"
         }
       ]
 

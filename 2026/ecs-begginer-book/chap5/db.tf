@@ -64,3 +64,9 @@ resource "aws_rds_cluster_instance" "main" {
     Name = "sbcntr-main-instance-1"
   }
 }
+
+
+resource "aws_secretsmanager_secret" "sbcntruser_db_credentials" {
+  name        = "rds-db-credentials/cluster-DBZG3YHZEOIGJLADDUB22XIJWY/sbcntruser/1786244874556"
+  description = "RDS database sbcntruser credentials for sbcntr-main"
+}
