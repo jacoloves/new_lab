@@ -1,7 +1,3 @@
-data "aws_iam_role" "ecs_task_execution_role" {
-  name = "ecsTaskExecutionRole"
-}
-
 resource "aws_cloudwatch_log_group" "frontend_app" {
   name = "/sbcntr/ecs/frontend-app"
 }
@@ -12,7 +8,7 @@ resource "aws_ecs_task_definition" "frontend_app" {
   network_mode             = "awsvpc"
   cpu                      = "512"
   memory                   = "1024"
-  execution_role_arn       = data.aws_iam_role.ecs_task_execution_role.arn
+  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
 
   runtime_platform {
     operating_system_family = "LINUX"
