@@ -37,6 +37,32 @@ resource "aws_ecs_task_definition" "backend_app" {
 
       memoryReservation = 256
 
+      environment = [
+        {
+          name  = "DB_NAME"
+          value = "app"
+        },
+        {
+          name  = "DB_CONN"
+          value = "1"
+        }
+      ]
+
+      secrets = [
+        {
+          name      = "DB_HOST"
+          valueFrom = "arn:aws:secretsmanager:ap-northeast-1:775115982694:secret:rds-db-credentials/cluster-DBZG3YHZEOIGJLADDUB22XIJWY/sbcntruser/1786244874556-IlvuR6:host::"
+        },
+        {
+          name      = "DB_USERNAME"
+          valueFrom = "arn:aws:secretsmanager:ap-northeast-1:775115982694:secret:rds-db-credentials/cluster-DBZG3YHZEOIGJLADDUB22XIJWY/sbcntruser/1786244874556-IlvuR6:username::"
+        },
+        {
+          name      = "DB_PASSWORD"
+          valueFrom = "arn:aws:secretsmanager:ap-northeast-1:775115982694:secret:rds-db-credentials/cluster-DBZG3YHZEOIGJLADDUB22XIJWY/sbcntruser/1786244874556-IlvuR6:password::"
+        }
+      ]
+
       logConfiguration = {
         logDriver = "awslogs"
         options = {

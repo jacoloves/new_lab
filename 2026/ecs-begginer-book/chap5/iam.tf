@@ -25,3 +25,24 @@ resource "aws_iam_role_policy_attachment" "policy2" {
   role       = aws_iam_role.ecs_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonECSInfrastructureRolePolicyForLoadBalancers"
 }
+
+resource "aws_iam_policy" "policy3" {
+  name        = "SbcntrGettingSecretsPolicy"
+  description = "Get secret policy for sbcntr-v2 hands-on"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "secretsmanager:GetSecretValue"
+        Resource = "arn:aws:secretsmanager:ap-northeast-1:775115982694:secret:rds-db-credentials/cluster-DBZG3YHZEOIGJLADDUB22XIJWY/sbcntruser/1786244874556-IlvuR6"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "policy_attachment1" {
+  role       = data.aws_iam_role.ecs_task_execution_role.name
+  policy_arn = aws_iam_policy.policy3.arn
+}
