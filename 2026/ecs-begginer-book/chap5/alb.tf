@@ -54,10 +54,7 @@ resource "aws_lb" "ingress" {
     aws_security_group.ingress.id,
   ]
 
-  subnets = [
-    aws_subnet.public_ingress_a.id,
-    aws_subnet.public_ingress_c.id,
-  ]
+  subnets = module.subnet_pair_ingress.ids
 
   tags = {
     Name = "sbcntr-ingress"

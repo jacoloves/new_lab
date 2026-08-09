@@ -11,138 +11,80 @@ data "aws_availability_zones" "available" {
 # コンテナアプリ用プライベートサブネット
 ##################################################
 
-resource "aws_subnet" "private_app_a" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.8.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[0]
-  map_public_ip_on_launch = false
+module "subnet_pair_app" {
+  source = "./modules/subnet_pair"
 
-  tags = {
-    Name = "sbcntr-private-app-a"
-    Type = "Isolated"
-  }
-}
-
-resource "aws_subnet" "private_app_c" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.9.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[1]
-  map_public_ip_on_launch = false
-
-  tags = {
-    Name = "sbcntr-private-app-c"
-    Type = "Isolated"
-  }
+  vpc_id              = aws_vpc.main.id
+  name_prefix         = "sbcntr-private-app"
+  type_tag            = "Isolated"
+  cidr_block_a        = "10.0.8.0/24"
+  cidr_block_c        = "10.0.9.0/24"
+  availability_zone_a = data.aws_availability_zones.available.names[0]
+  availability_zone_c = data.aws_availability_zones.available.names[1]
 }
 
 ##################################################
 # DB用プライベートサブネット
 ##################################################
 
-resource "aws_subnet" "private_db_a" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.16.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[0]
-  map_public_ip_on_launch = false
+module "subnet_pair_db" {
+  source = "./modules/subnet_pair"
 
-  tags = {
-    Name = "sbcntr-private-db-a"
-    Type = "Isolated"
-  }
-}
-
-resource "aws_subnet" "private_db_c" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.17.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[1]
-  map_public_ip_on_launch = false
-
-  tags = {
-    Name = "sbcntr-private-db-c"
-    Type = "Isolated"
-  }
+  vpc_id              = aws_vpc.main.id
+  name_prefix         = "sbcntr-private-db"
+  type_tag            = "Isolated"
+  cidr_block_a        = "10.0.16.0/24"
+  cidr_block_c        = "10.0.17.0/24"
+  availability_zone_a = data.aws_availability_zones.available.names[0]
+  availability_zone_c = data.aws_availability_zones.available.names[1]
 }
 
 ##################################################
 # Ingress用パブリックサブネット
 ##################################################
 
-resource "aws_subnet" "public_ingress_a" {
+module "subnet_pair_ingress" {
+  source = "./modules/subnet_pair"
+
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.0.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[0]
+  name_prefix             = "sbcntr-public-ingress"
+  type_tag                = "Public"
+  cidr_block_a            = "10.0.0.0/24"
+  cidr_block_c            = "10.0.1.0/24"
+  availability_zone_a     = data.aws_availability_zones.available.names[0]
+  availability_zone_c     = data.aws_availability_zones.available.names[1]
   map_public_ip_on_launch = true
-
-  tags = {
-    Name = "sbcntr-public-ingress-a"
-    Type = "Public"
-  }
-}
-
-resource "aws_subnet" "public_ingress_c" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[1]
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name = "sbcntr-public-ingress-c"
-    Type = "Public"
-  }
 }
 
 ##################################################
 # 管理サーバ用パブリックサブネット
 ##################################################
 
-resource "aws_subnet" "public_management_a" {
+module "subnet_pair_management" {
+  source = "./modules/subnet_pair"
+
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.240.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[0]
+  name_prefix             = "sbcntr-public-management"
+  type_tag                = "Public"
+  cidr_block_a            = "10.0.240.0/24"
+  cidr_block_c            = "10.0.241.0/24"
+  availability_zone_a     = data.aws_availability_zones.available.names[0]
+  availability_zone_c     = data.aws_availability_zones.available.names[1]
   map_public_ip_on_launch = true
-
-  tags = {
-    Name = "sbcntr-public-management-a"
-    Type = "Public"
-  }
-}
-
-resource "aws_subnet" "public_management_c" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.241.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[1]
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name = "sbcntr-public-management-c"
-    Type = "Public"
-  }
 }
 
 ##################################################
 # VPCエンドポイント(Egress通信)用プライベートサブネット
 ##################################################
 
-resource "aws_subnet" "private_egress_a" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.248.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[0]
-  map_public_ip_on_launch = false
+module "subnet_pair_egress" {
+  source = "./modules/subnet_pair"
 
-  tags = {
-    Name = "sbcntr-private-egress-a"
-    Type = "Isolated"
-  }
-}
-
-resource "aws_subnet" "private_egress_c" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.249.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[1]
-  map_public_ip_on_launch = false
-
-  tags = {
-    Name = "sbcntr-private-egress-c"
-    Type = "Isolated"
-  }
+  vpc_id              = aws_vpc.main.id
+  name_prefix         = "sbcntr-private-egress"
+  type_tag            = "Isolated"
+  cidr_block_a        = "10.0.248.0/24"
+  cidr_block_c        = "10.0.249.0/24"
+  availability_zone_a = data.aws_availability_zones.available.names[0]
+  availability_zone_c = data.aws_availability_zones.available.names[1]
 }
