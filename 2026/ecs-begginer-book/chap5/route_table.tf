@@ -12,12 +12,12 @@ resource "aws_route_table" "app" {
 
 resource "aws_route_table_association" "app_a" {
   route_table_id = aws_route_table.app.id
-  subnet_id      = aws_subnet.private_app_a.id
+  subnet_id      = module.subnet_pair_app.a_id
 }
 
 resource "aws_route_table_association" "app_c" {
   route_table_id = aws_route_table.app.id
-  subnet_id      = aws_subnet.private_app_c.id
+  subnet_id      = module.subnet_pair_app.c_id
 }
 
 ##################################################
@@ -34,12 +34,12 @@ resource "aws_route_table" "ingress" {
 
 resource "aws_route_table_association" "ingress_a" {
   route_table_id = aws_route_table.ingress.id
-  subnet_id      = aws_subnet.public_ingress_a.id
+  subnet_id      = module.subnet_pair_ingress.a_id
 }
 
 resource "aws_route_table_association" "ingress_c" {
   route_table_id = aws_route_table.ingress.id
-  subnet_id      = aws_subnet.public_ingress_c.id
+  subnet_id      = module.subnet_pair_ingress.c_id
 }
 
 # Ingress用ルートテーブルのデフォルトルート(IGW経由)
@@ -63,12 +63,12 @@ resource "aws_route_table" "management" {
 
 resource "aws_route_table_association" "management_a" {
   route_table_id = aws_route_table.management.id
-  subnet_id      = aws_subnet.public_management_a.id
+  subnet_id      = module.subnet_pair_management.a_id
 }
 
 resource "aws_route_table_association" "management_c" {
   route_table_id = aws_route_table.management.id
-  subnet_id      = aws_subnet.public_management_c.id
+  subnet_id      = module.subnet_pair_management.c_id
 }
 
 # 管理用ルートテーブルのデフォルトルート(IGW経由)

@@ -31,10 +31,7 @@ resource "aws_ecs_service" "frontend_app" {
   }
 
   network_configuration {
-    subnets = [
-      aws_subnet.private_app_a.id,
-      aws_subnet.private_app_c.id,
-    ]
+    subnets = module.subnet_pair_app.ids
 
     security_groups = [
       aws_security_group.frontend_app.id,

@@ -18,10 +18,7 @@ resource "aws_ecs_service" "backend_app" {
   deployment_minimum_healthy_percent = 100
 
   network_configuration {
-    subnets = [
-      aws_subnet.private_app_a.id,
-      aws_subnet.private_app_c.id,
-    ]
+    subnets = module.subnet_pair_app.ids
 
     security_groups = [
       aws_security_group.backend_app.id,
