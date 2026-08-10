@@ -1,52 +1,41 @@
-resource "aws_vpc_endpoint" "ecr_api" {
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.ap-northeast-1.ecr.api"
-  vpc_endpoint_type   = "Interface"
-  private_dns_enabled = true
+module "vpc_endpoint_ecr_api" {
+  source = "./modules/vpc_interface_endpoint"
 
-  subnet_ids = module.subnet_pair_egress.ids
-
-  security_group_ids = [
-    aws_security_group.egress_vpce.id,
-  ]
-
-  tags = {
-    Name = "sbcntr-ecr-api"
-  }
+  vpc_id             = aws_vpc.main.id
+  service_name       = "com.amazonaws.ap-northeast-1.ecr.api"
+  subnet_ids         = module.subnet_pair_egress.ids
+  security_group_ids = [aws_security_group.egress_vpce.id]
+  name               = "sbcntr-ecr-api"
 }
 
-resource "aws_vpc_endpoint" "ecr_dkr" {
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.ap-northeast-1.ecr.dkr"
-  vpc_endpoint_type   = "Interface"
-  private_dns_enabled = true
+module "vpc_endpoint_ecr_dkr" {
+  source = "./modules/vpc_interface_endpoint"
 
-  subnet_ids = module.subnet_pair_egress.ids
-
-  security_group_ids = [
-    aws_security_group.egress_vpce.id,
-  ]
-
-  tags = {
-    Name = "sbcntr-ecr-dkr"
-  }
+  vpc_id             = aws_vpc.main.id
+  service_name       = "com.amazonaws.ap-northeast-1.ecr.dkr"
+  subnet_ids         = module.subnet_pair_egress.ids
+  security_group_ids = [aws_security_group.egress_vpce.id]
+  name               = "sbcntr-ecr-dkr"
 }
 
-resource "aws_vpc_endpoint" "logs" {
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.ap-northeast-1.logs"
-  vpc_endpoint_type   = "Interface"
-  private_dns_enabled = true
+module "vpc_endpoint_logs" {
+  source = "./modules/vpc_interface_endpoint"
 
-  subnet_ids = module.subnet_pair_egress.ids
+  vpc_id             = aws_vpc.main.id
+  service_name       = "com.amazonaws.ap-northeast-1.logs"
+  subnet_ids         = module.subnet_pair_egress.ids
+  security_group_ids = [aws_security_group.egress_vpce.id]
+  name               = "sbcntr-logs"
+}
 
-  security_group_ids = [
-    aws_security_group.egress_vpce.id,
-  ]
+module "vpc_endpoint_secretsmanager" {
+  source = "./modules/vpc_interface_endpoint"
 
-  tags = {
-    Name = "sbcntr-logs"
-  }
+  vpc_id             = aws_vpc.main.id
+  service_name       = "com.amazonaws.ap-northeast-1.secretsmanager"
+  subnet_ids         = module.subnet_pair_egress.ids
+  security_group_ids = [aws_security_group.egress_vpce.id]
+  name               = "sbcntr-secrets-manager"
 }
 
 resource "aws_vpc_endpoint" "s3" {
@@ -60,22 +49,5 @@ resource "aws_vpc_endpoint" "s3" {
 
   tags = {
     Name = "sbcntr-s3"
-  }
-}
-
-resource "aws_vpc_endpoint" "secretsmanager" {
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.ap-northeast-1.secretsmanager"
-  vpc_endpoint_type   = "Interface"
-  private_dns_enabled = true
-
-  subnet_ids = module.subnet_pair_egress.ids
-
-  security_group_ids = [
-    aws_security_group.egress_vpce.id,
-  ]
-
-  tags = {
-    Name = "sbcntr-secrets-manager"
   }
 }
